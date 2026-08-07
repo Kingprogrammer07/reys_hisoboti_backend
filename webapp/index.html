@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Allow pinch-zoom (a11y). Inputs are 16px so iOS won't auto-zoom on focus. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#ffffff" id="themeColor" />
+  <title>Reys hisoboti</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/css/styles.css?v=outboxdiag1" />
+</head>
+<body>
+  <!-- Top bar: actions row on top, centered tabs below -->
+  <header class="topbar">
+    <div class="topbar__actions">
+      <button type="button" class="theme-btn topbar__back" id="backHomeBtn" aria-label="Orqaga">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m14 6-6 6 6 6 1.4-1.4L10.8 12l4.6-4.6z"/></svg>
+      </button>
+      <span class="topbar__report" id="reportName"></span>
+      <button type="button" class="theme-btn" id="activityBtn" aria-label="Faolligim">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 18a8 8 0 1 1 0-16 8 8 0 0 1 0 16Zm1-13h-2v6l5 3 .9-1.6-3.9-2.3V7Z"/></svg>
+      </button>
+      <button type="button" class="theme-btn" id="passkeyAddBtn" aria-label="Passkey o'rnatish" hidden>
+        <svg viewBox="0 0 24 24" class="ic"><path d="M14 2a6 6 0 0 0-5.6 8.2L2 16.6V22h5.4l1.2-1.2 1.4-1.4-1.2-1.2 1.6-1.6 1.4 1.4 1.6-1.6A6 6 0 1 0 14 2Zm2.5 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>
+      </button>
+      <button type="button" class="theme-btn" id="settingsBtn" aria-label="Sozlamalar">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm0 6a2 2 0 1 1 0-4 2 2 0 0 1 0 4Zm8.4-2 1.8-1.4-1.8-3.1-2.1.7a6.9 6.9 0 0 0-1.4-.8L14.5 5h-3.6l-.4 2.4c-.5.2-1 .5-1.4.8l-2.1-.7-1.8 3.1L7 12l-.3 1.4-1.8 1.4 1.8 3.1 2.1-.7c.4.3.9.6 1.4.8l.4 2.4h3.6l.4-2.4c.5-.2 1-.5 1.4-.8l2.1.7 1.8-3.1L20.4 13 20.7 12Z"/></svg>
+      </button>
+      <button type="button" class="theme-btn js-theme" id="themeBtn" aria-label="Mavzu"></button>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Bo'limlar">
+      <button class="tab is-active" role="tab" data-tab="report" aria-selected="true">Reys hisoboti</button>
+      <button class="tab" role="tab" data-tab="lost" aria-selected="false">Adashgan yuklar</button>
+    </nav>
+  </header>
+
+  <main class="content">
+    <!-- ============ TAB 1: REYS HISOBOTI ============ -->
+    <section class="panel is-active" id="panel-report" role="tabpanel">
+      <!-- Photos -->
+      <div class="field work-card work-card--photos">
+        <div class="field__head">
+          <span class="field__label">Rasmlar</span>
+          <span class="counter" id="photoCounter">0/10</span>
+        </div>
+
+        <button type="button" class="btn btn--ghost view-btn" id="reysViewBtn">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M4 5h16v2H4V5Zm0 4h16v2H4V9Zm0 4h10v2H4v-2Zm0 4h10v2H4v-2Z"/></svg>
+          Yuklanganlar
+          <span class="view-badge" id="reysViewCount">0</span>
+        </button>
+
+        <div class="photo-grid" id="photoGrid"></div>
+
+        <div class="photo-actions">
+          <button type="button" class="btn btn--ghost" id="btnGallery">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2ZM8.5 11l2.5 3 3.5-4.5L19 16H5l3.5-5Z"/></svg>
+            Galereya
+          </button>
+          <button type="button" class="btn btn--ghost" id="btnCamera">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M9.4 3 7.6 5.1H4A2 2 0 0 0 2 7.1v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-11a2 2 0 0 0-2-2h-3.6L14.6 3H9.4Zm2.6 5.1a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
+            Kamera
+          </button>
+        </div>
+
+        <!-- Visually hidden (NOT display:none) so the camera `capture` hint is honored. -->
+        <input type="file" id="inGallery" class="file-input" accept="image/*" multiple />
+        <input type="file" id="inCamera" class="file-input" accept="image/*" capture="environment" />
+      </div>
+
+      <!-- Type (searchable select) -->
+      <div class="field work-card work-card--type">
+        <span class="field__label">Tovar turi</span>
+        <div class="select-row">
+          <button type="button" class="select" id="typeSelect">
+            <span class="select__value" id="typeValue">akb</span>
+            <svg viewBox="0 0 24 24" class="select__chev"><path d="m7 10 5 5 5-5z"/></svg>
+          </button>
+          <button type="button" class="icon-btn" id="typePencil" aria-label="O'zingiz kiriting">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Coefficient -->
+      <div class="field work-card work-card--coef">
+        <span class="field__label">Koeffitsient</span>
+        <div class="chips" id="coefChips">
+          <button type="button" class="chip is-active" data-mode="none" data-value="0">Ayirilmasin</button>
+          <button type="button" class="chip" data-mode="fixed" data-value="0.94">0.94</button>
+          <button type="button" class="chip" data-mode="fixed" data-value="1.22">1.22</button>
+          <button type="button" class="chip" data-mode="fixed" data-value="1.4">1.4</button>
+          <button type="button" class="chip" data-mode="custom">O'zim kiritaman</button>
+        </div>
+        <div class="coef-menu" id="coefBoxMenu" hidden>
+          <button type="button" class="coef-menu__item" data-box-value="0">Ayirilmasin</button>
+          <button type="button" class="coef-menu__item" data-box-value="1">Ayirilmasin (1)</button>
+          <button type="button" class="coef-menu__item" data-box-value="1.22">Ayirilmasin (1.22)</button>
+          <button type="button" class="coef-menu__item" data-box-value="1.4">Ayirilmasin (1.4)</button>
+        </div>
+        <div class="custom-coef" id="coefCustomWrap" hidden>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="input"
+            id="coefCustom"
+            aria-label="Koeffitsient qiymati"
+            placeholder="Masalan: 1.05"
+          />
+        </div>
+      </div>
+
+      <!-- Weight -->
+      <div class="field work-card work-card--weight">
+        <label class="field__label" for="weight">Og'irlik</label>
+        <div class="input-suffix input-suffix--save">
+          <input
+            type="text"
+            inputmode="decimal"
+            class="input"
+            id="weight"
+            placeholder="0"
+          />
+          <button type="button" class="suffix-save" id="weightQuickSave" aria-label="Saqlash">
+            <span>kg</span>
+            <svg viewBox="0 0 24 24" class="ic"><path d="m9 16.2-3.5-3.5L4.1 14.1 9 19 20.3 7.7l-1.4-1.4z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Single Save button (works in Telegram WebView and browser alike) -->
+      <button type="button" class="btn btn--primary save-btn work-save" id="saveBtn">
+        Saqlash
+      </button>
+    </section>
+
+    <!-- ============ TAB 2: ADASHGAN YUKLAR ============ -->
+    <section class="panel" id="panel-lost" role="tabpanel" hidden>
+      <!-- Photos -->
+      <div class="field work-card work-card--photos">
+        <div class="field__head">
+          <span class="field__label">Rasmlar</span>
+          <span class="counter" id="adjPhotoCounter">0/10</span>
+        </div>
+        <button type="button" class="btn btn--ghost view-btn" id="adjViewBtn">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M4 5h16v2H4V5Zm0 4h16v2H4V9Zm0 4h10v2H4v-2Zm0 4h10v2H4v-2Z"/></svg>
+          Yuklanganlar
+          <span class="view-badge" id="adjViewCount">0</span>
+        </button>
+        <div class="photo-grid" id="adjPhotoGrid"></div>
+        <div class="photo-actions">
+          <button type="button" class="btn btn--ghost" id="adjBtnGallery">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2ZM8.5 11l2.5 3 3.5-4.5L19 16H5l3.5-5Z"/></svg>
+            Galereya
+          </button>
+          <button type="button" class="btn btn--ghost" id="adjBtnCamera">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M9.4 3 7.6 5.1H4A2 2 0 0 0 2 7.1v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-11a2 2 0 0 0-2-2h-3.6L14.6 3H9.4Zm2.6 5.1a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
+            Kamera
+          </button>
+        </div>
+      </div>
+
+      <!-- From type (subtract) -->
+      <div class="field work-card work-card--from">
+        <span class="field__label">Qaysi turdan ayirish</span>
+        <button type="button" class="select" id="adjFromSelect">
+          <span class="select__value select__value--muted" id="adjFromValue">Tanlang</span>
+          <svg viewBox="0 0 24 24" class="select__chev"><path d="m7 10 5 5 5-5z"/></svg>
+        </button>
+        <p class="bal-line" id="adjFromBal"></p>
+      </div>
+
+      <div class="transfer-arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 4v13m0 0-5-5m5 5 5-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+
+      <!-- To type (add) -->
+      <div class="field work-card work-card--to">
+        <span class="field__label">Qaysi turga qo'shish</span>
+        <button type="button" class="select" id="adjToSelect">
+          <span class="select__value select__value--muted" id="adjToValue">Tanlang</span>
+          <svg viewBox="0 0 24 24" class="select__chev"><path d="m7 10 5 5 5-5z"/></svg>
+        </button>
+        <p class="bal-line" id="adjToBal"></p>
+      </div>
+
+      <!-- Weight -->
+      <div class="field work-card work-card--weight">
+        <label class="field__label" for="adjWeight">Og'irlik</label>
+        <div class="input-suffix">
+          <input type="text" inputmode="decimal" class="input" id="adjWeight" placeholder="0" />
+          <span class="suffix">kg</span>
+        </div>
+      </div>
+
+      <button type="button" class="btn btn--primary save-btn work-save" id="adjSaveBtn">Saqlash</button>
+
+      <!-- Current stock (each tovar turi separately) -->
+      <div class="field work-card work-card--balances">
+        <span class="field__label">Ombor holati</span>
+        <div class="balances" id="balances"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Bottom sheet for searchable select -->
+  <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+  <div class="sheet" id="sheet" hidden role="dialog" aria-modal="true" aria-label="Tovar turi">
+    <div class="sheet__grip" id="sheetGrip"><span class="sheet__handle" aria-hidden="true"></span></div>
+    <div class="sheet__top">
+      <span class="sheet__title" id="sheetTitle">Tovar turi</span>
+      <button type="button" class="sheet__close" id="sheetClose" aria-label="Yopish">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12l-6.3-6.3-1.4 1.4L10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+      </button>
+    </div>
+    <div class="sheet__search">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M10 18a8 8 0 1 1 5.3-2l5.4 5.3-1.4 1.4-5.3-5.4A8 8 0 0 1 10 18Zm0-2a6 6 0 1 0 0-12 6 6 0 0 0 0 12Z"/></svg>
+      <input type="text" id="sheetInput" class="sheet__input" placeholder="Qidirish yoki yangi tur kiriting" />
+    </div>
+    <ul class="sheet__list" id="sheetList"></ul>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <!-- Live camera (getUserMedia). Stream stays alive between shots to avoid
+       re-prompting for permission; modal just toggles display. -->
+  <div class="cam" id="camModal" hidden>
+    <video class="cam__video" id="camVideo" autoplay playsinline muted></video>
+    <button type="button" class="cam__btn cam__close" id="camClose" aria-label="Yopish">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12 5.7 5.7 4.3 7.1 10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+    </button>
+    <button type="button" class="cam__btn cam__flip" id="camFlip" aria-label="Kamerani almashtirish">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M12 6a9 9 0 0 1 8.5 6h-2.1A7 7 0 0 0 6.7 9.3L9 11.6H3V5.6l2.2 2.2A9 9 0 0 1 12 6Zm0 12a9 9 0 0 1-8.5-6h2.1a7 7 0 0 0 11.7 2.7L15 14.4h6v6l-2.2-2.2A9 9 0 0 1 12 18Z"/></svg>
+    </button>
+    <button type="button" class="cam__zoom" id="camZoom" aria-label="Zoom">1.0x</button>
+    <button type="button" class="cam__shot" id="camShot" aria-label="Suratga olish"></button>
+    <canvas id="camCanvas" hidden></canvas>
+  </div>
+
+  <!-- Photo lightbox (tap a thumbnail to view large; Telegram-like:
+       prev/next arrows, photo counter, caption bar) -->
+  <div class="lightbox" id="lightbox" hidden>
+    <img class="lightbox__img" id="lightboxImg" alt="" />
+    <span class="lightbox__count" id="lightboxCount" hidden>1/1</span>
+    <button type="button" class="lightbox__close" id="lightboxClose" aria-label="Yopish">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12 5.7 5.7 4.3 7.1 10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+    </button>
+    <button type="button" class="lightbox__nav lightbox__nav--prev" id="lightboxPrev" aria-label="Oldingi" hidden>
+      <svg viewBox="0 0 24 24" class="ic"><path d="m15 6-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z"/></svg>
+    </button>
+    <button type="button" class="lightbox__nav lightbox__nav--next" id="lightboxNext" aria-label="Keyingi" hidden>
+      <svg viewBox="0 0 24 24" class="ic"><path d="m9 6 6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z"/></svg>
+    </button>
+    <div class="lightbox__caption" id="lightboxCaption" hidden>
+      <div class="lightbox__caption-main" id="lightboxCapMain"></div>
+      <div class="lightbox__caption-sub" id="lightboxCapSub"></div>
+    </div>
+    <button type="button" class="lightbox__edit" id="lightboxEdit" aria-label="Tahrirlash" hidden>
+      <svg viewBox="0 0 24 24" class="ic"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg>
+      Tahrirlash
+    </button>
+    <div class="lightbox__edit-panel" id="lightboxEditPanel" hidden>
+      <div class="lightbox__edit-title" id="lbEditTitle">Tahrirlash</div>
+      <label class="lightbox__field">
+        <span id="lbEditNameLabel">Nomi</span>
+        <input type="text" id="lbEditName" autocomplete="off" />
+      </label>
+      <label class="lightbox__field">
+        <span>Og'irlik</span>
+        <input type="text" inputmode="decimal" id="lbEditWeight" />
+      </label>
+      <label class="lightbox__field" id="lbEditCoefRow">
+        <span id="lbEditCoefLabel">Koeffitsient</span>
+        <input type="text" inputmode="decimal" id="lbEditCoef" />
+      </label>
+      <div class="lightbox__edit-actions">
+        <button type="button" class="lightbox__edit-cancel" id="lbEditCancel">Bekor qilish</button>
+        <button type="button" class="lightbox__edit-save" id="lbEditSave">Saqlash</button>
+      </div>
+    </div>
+    <button type="button" class="lightbox__del" id="lightboxDel" aria-label="O'chirish">
+      <svg viewBox="0 0 24 24" class="ic"><path d="M9 3h6l1 2h4v2H4V5h4l1-2ZM6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 8Zm4 2v8h1v-8h-1Zm3 0v8h1v-8h-1Z"/></svg>
+      O'chirish
+    </button>
+  </div>
+
+  <!-- Home: reports list -->
+  <div class="screen home" id="homeScreen" hidden>
+    <header class="screen__top">
+      <span class="screen__title">Hisobotlar</span>
+      <button type="button" class="theme-btn js-theme" id="homeThemeBtn" aria-label="Mavzu"></button>
+    </header>
+    <div class="screen__body">
+      <button type="button" class="btn btn--primary" id="newReportBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+        Yangi hisobot qo'shish
+      </button>
+      <p class="home__hint" id="homeHint"></p>
+      <ul class="report-list" id="reportList"></ul>
+    </div>
+  </div>
+
+  <!-- Report menu: pick a section inside the opened report -->
+  <div class="screen" id="menuScreen" hidden>
+    <header class="screen__top">
+      <button type="button" class="theme-btn" id="menuBackBtn" aria-label="Hisobotlar">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m14 6-6 6 6 6 1.4-1.4L10.8 12l4.6-4.6z"/></svg>
+      </button>
+      <span class="screen__title" id="menuTitle"></span>
+      <button type="button" class="theme-btn js-theme" id="menuThemeBtn" aria-label="Mavzu"></button>
+    </header>
+    <div class="screen__body">
+      <div class="menu">
+        <div class="menu-row">
+          <button type="button" class="menu-btn" id="menuTotalBtn">
+            <span class="menu-btn__ic">
+              <svg viewBox="0 0 24 24" class="ic"><path d="M12 3a3 3 0 0 0-2.8 2H5a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4.2A3 3 0 0 0 12 3Zm0 2a1 1 0 1 1 0 2 1 1 0 0 1 0-2Zm-2 5h4l2 6H8l2-6Z"/></svg>
+            </span>
+            <span class="menu-btn__label">Obshiy ves</span>
+          </button>
+          <button type="button" class="menu-xls" id="menuTotalXls" aria-label="Excel yuklash">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M12 3 7 8h3v6h4V8h3l-5-5ZM5 18h14v2H5z"/></svg>
+            <span>Excel</span>
+          </button>
+        </div>
+        <div class="menu-row">
+          <button type="button" class="menu-btn menu-btn--accent" id="menuDistBtn">
+            <span class="menu-btn__ic">
+              <svg viewBox="0 0 24 24" class="ic"><path d="M3 5h11v9H3V5Zm12 3h3l3 3v3h-6V8ZM6.5 16a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm11 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"/></svg>
+            </span>
+            <span class="menu-btn__label">Kargolarga tarqatish</span>
+          </button>
+          <button type="button" class="menu-xls" id="menuDistXls" aria-label="Kargolarga Excel yuklash">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M12 3 7 8h3v6h4V8h3l-5-5ZM5 18h14v2H5z"/></svg>
+            <span>Excel</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Obshiy ves submenu: Top / Bizda qoladigan / Bizdan chiqgan -->
+  <div class="screen" id="obshiyScreen" hidden>
+    <header class="screen__top">
+      <button type="button" class="theme-btn" id="obshiyBackBtn" aria-label="Orqaga">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m14 6-6 6 6 6 1.4-1.4L10.8 12l4.6-4.6z"/></svg>
+      </button>
+      <span class="screen__title">Obshiy ves</span>
+      <button type="button" class="theme-btn js-theme" id="obshiyThemeBtn" aria-label="Mavzu"></button>
+    </header>
+    <div class="screen__body">
+      <div class="menu">
+        <button type="button" class="menu-btn" id="obshiyTopBtn">
+          <span class="menu-btn__ic">
+            <svg viewBox="0 0 24 24" class="ic"><path d="m12 3 2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 21.4l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9L12 3Z"/></svg>
+          </span>
+          <span class="menu-btn__label">Top</span>
+        </button>
+        <button type="button" class="menu-btn" id="obshiyTopChiqganBtn">
+          <span class="menu-btn__ic">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M12 3 8 7h3v7h2V7h3l-4-4ZM5 19h14v2H5z"/></svg>
+          </span>
+          <span class="menu-btn__label">Topdan chiqgan</span>
+        </button>
+        <button type="button" class="menu-btn" id="obshiyBizdaBtn">
+          <span class="menu-btn__ic">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M12 2 3 6v12l9 4 9-4V6l-9-4Zm0 2.2 6.5 2.9L12 10 5.5 7.1 12 4.2ZM5 8.5l6 2.7v7.6l-6-2.7V8.5Zm14 0v7.6l-6 2.7v-7.6l6-2.7Z"/></svg>
+          </span>
+          <span class="menu-btn__label">Bizda qoladigan</span>
+        </button>
+        <button type="button" class="menu-btn" id="obshiyChiqganBtn">
+          <span class="menu-btn__ic">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M14 4l6 6-6 6v-4H5v-4h9V4Z"/></svg>
+          </span>
+          <span class="menu-btn__label">Bizdan chiqgan</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Obshiy ves → Top / Bizda qoladigan / Bizdan chiqgan (shared form) -->
+  <div class="screen" id="topScreen" hidden>
+    <header class="screen__top">
+      <button type="button" class="theme-btn" id="topBackBtn" aria-label="Orqaga">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m14 6-6 6 6 6 1.4-1.4L10.8 12l4.6-4.6z"/></svg>
+      </button>
+      <span class="screen__title" id="topTitle">Top</span>
+      <button type="button" class="theme-btn js-theme" id="topThemeBtn" aria-label="Mavzu"></button>
+    </header>
+    <div class="screen__body">
+      <!-- Photos -->
+      <div class="field">
+        <div class="field__head">
+          <span class="field__label">Rasmlar</span>
+          <span class="counter" id="topPhotoCounter">0/10</span>
+        </div>
+        <button type="button" class="btn btn--ghost view-btn" id="topViewBtn">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M4 5h16v2H4V5Zm0 4h16v2H4V9Zm0 4h10v2H4v-2Zm0 4h10v2H4v-2Z"/></svg>
+          Yuklanganlar
+          <span class="view-badge" id="topViewCount">0</span>
+        </button>
+        <div class="photo-grid" id="topPhotoGrid"></div>
+        <div class="photo-actions">
+          <button type="button" class="btn btn--ghost" id="topBtnGallery">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2ZM8.5 11l2.5 3 3.5-4.5L19 16H5l3.5-5Z"/></svg>
+            Galereya
+          </button>
+          <button type="button" class="btn btn--ghost" id="topBtnCamera">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M9.4 3 7.6 5.1H4A2 2 0 0 0 2 7.1v11a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-11a2 2 0 0 0-2-2h-3.6L14.6 3H9.4Zm2.6 5.1a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
+            Kamera
+          </button>
+        </div>
+      </div>
+
+      <!-- Karobka kodi (numeric; pencil unlocks free text) -->
+      <div class="field">
+        <span class="field__label" id="topCodeLabel">Karobka kodi</span>
+        <div class="select-row">
+          <input type="text" inputmode="numeric" class="input" id="topCode"
+                 placeholder="Masalan: 12345" autocomplete="off" autocapitalize="off" />
+          <button type="button" class="icon-btn" id="topCodePencil" aria-label="Erkin kiritish">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Karobka weight coefficient -->
+      <div class="field">
+        <span class="field__label">Karobka og'irligi</span>
+        <div class="chips" id="topCoefChips">
+          <button type="button" class="chip is-active" data-mode="none" data-value="0">Ayirilmasin</button>
+          <button type="button" class="chip" data-mode="fixed" data-value="1">1</button>
+          <button type="button" class="chip" data-mode="fixed" data-value="1.22">1.22</button>
+          <button type="button" class="chip" data-mode="custom">O'zim kiritaman</button>
+        </div>
+        <div class="custom-coef" id="topCoefCustomWrap" hidden>
+          <input
+            type="text"
+            inputmode="decimal"
+            class="input"
+            id="topCoefCustom"
+            aria-label="Karobka og'irligi"
+            placeholder="Masalan: 1.05"
+          />
+        </div>
+      </div>
+
+      <!-- Weight -->
+      <div class="field">
+        <label class="field__label" for="topWeight">Og'irlik</label>
+        <div class="input-suffix">
+          <input type="text" inputmode="decimal" class="input" id="topWeight" placeholder="0" />
+          <span class="suffix">kg</span>
+        </div>
+      </div>
+
+      <!-- Fast mode -->
+      <div class="field">
+        <label class="toggle-row">
+          <span>
+            <span class="toggle-row__title">Fast mode</span>
+            <span class="toggle-row__sub">Rasmdan so'ng kodga fokus, saqlagach kamera ochiladi</span>
+          </span>
+          <span class="switch"><input type="checkbox" id="topFast" /><span class="switch__track"></span></span>
+        </label>
+      </div>
+
+      <button type="button" class="btn btn--primary save-btn" id="topSave">Saqlash</button>
+    </div>
+  </div>
+
+  <!-- Saved entries viewer (Top / Bizda qoladigan / Bizdan chiqgan), paginated -->
+  <div class="screen" id="entriesScreen" hidden>
+    <header class="screen__top">
+      <button type="button" class="theme-btn" id="entriesBackBtn" aria-label="Orqaga">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m14 6-6 6 6 6 1.4-1.4L10.8 12l4.6-4.6z"/></svg>
+      </button>
+      <span class="screen__title" id="entriesTitle">Yuklanganlar</span>
+      <button type="button" class="theme-btn js-theme" id="entriesThemeBtn" aria-label="Mavzu"></button>
+    </header>
+    <div class="screen__body">
+      <div class="entries" id="entriesList"></div>
+    </div>
+    <div class="entries-actions" id="entriesActions" hidden>
+      <button type="button" class="btn btn--primary" id="entriesSendUnsentBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m21.8 3.2-4 18a1 1 0 0 1-1.6.5l-5.3-4.1-3 2.9a1 1 0 0 1-1.7-.7v-4.5L2.6 12a1 1 0 0 1 .4-1.7l17.5-8.1a1 1 0 0 1 1.3 1ZM7.5 14.4v2.9l1.7-1.7 7.6-8.4-9.3 7.2Z"/></svg>
+        Yuborilmaganlarni yuborish
+      </button>
+      <button type="button" class="btn btn--ghost" id="entriesResendSentBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M12 6a6 6 0 0 0-5.7 4H4.2A8 8 0 0 1 18 6.3V3h2v7h-7V8h3.7A6 6 0 0 0 12 6Zm-6 8h7v2H9.3A6 6 0 0 0 20 14h2.1A8 8 0 0 1 6 17.7V21H4v-7h2Z"/></svg>
+        Yuborilganlarni qayta yuborish
+      </button>
+      <button type="button" class="btn btn--ghost" id="entriesSendSelectedBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Zm-8.1 13.3-4.2-4.2 1.4-1.4 2.8 2.8 5.6-5.6 1.4 1.4-7 7Z"/></svg>
+        Tanlanganlarni yuborish
+      </button>
+    </div>
+    <div class="pager" id="entriesPager" hidden>
+      <button type="button" class="filter-nav" id="entriesPrev" aria-label="Oldingi">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m15 6-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z"/></svg>
+      </button>
+      <span class="pager__label" id="entriesPageLabel">1/1</span>
+      <button type="button" class="filter-nav" id="entriesNext" aria-label="Keyingi">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m9 6 6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- New-report naming sheet -->
+  <div class="sheet-backdrop" id="nameBackdrop" hidden></div>
+  <div class="sheet" id="nameSheet" hidden role="dialog" aria-modal="true">
+    <div class="sheet__grip"><span class="sheet__handle" aria-hidden="true"></span></div>
+    <div class="sheet__top">
+      <span class="sheet__title">Yangi hisobot</span>
+      <button type="button" class="sheet__close" id="nameClose" aria-label="Yopish">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12 5.7 5.7 4.3 7.1 10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+      </button>
+    </div>
+    <div class="sheet__pad">
+      <input type="text" id="nameInput" class="input" placeholder="Hisobot nomi" maxlength="60"
+             autocapitalize="sentences" autocomplete="off" />
+      <button type="button" class="btn btn--primary" id="nameSave">Yaratish</button>
+      <p class="login__error" id="nameError" hidden></p>
+    </div>
+  </div>
+
+  <!-- Settings sheet -->
+  <div class="sheet-backdrop" id="setBackdrop" hidden></div>
+  <div class="sheet" id="setSheet" hidden role="dialog" aria-modal="true">
+    <div class="sheet__grip"><span class="sheet__handle" aria-hidden="true"></span></div>
+    <div class="sheet__top">
+      <span class="sheet__title">Sozlamalar</span>
+      <button type="button" class="sheet__close" id="setClose" aria-label="Yopish">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12 5.7 5.7 4.3 7.1 10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+      </button>
+    </div>
+    <div class="sheet__pad">
+      <label class="toggle-row">
+        <span>
+          <span class="toggle-row__title">Qiymatlarni eslab qolish</span>
+          <span class="toggle-row__sub">Saqlangach tovar turi va koeffitsient qayta tanlanadi</span>
+        </span>
+        <span class="switch"><input type="checkbox" id="rememberToggle" /><span class="switch__track"></span></span>
+      </label>
+      <label class="toggle-row">
+        <span>
+          <span class="toggle-row__title">Fast mode</span>
+          <span class="toggle-row__sub">Saqlangach keyingi yuk uchun kamera ochiladi</span>
+        </span>
+        <span class="switch"><input type="checkbox" id="reysFastToggle" /><span class="switch__track"></span></span>
+      </label>
+      <button type="button" class="act-item" id="zeroCoefBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M7 7h10v2H7V7Zm0 4h10v2H7v-2Zm0 4h6v2H7v-2ZM5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Z"/></svg>
+        Top yuklanganlarini sof og'irlikka o'tkazish
+      </button>
+      <button type="button" class="act-item" id="outboxDiagBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M4 4h16v4H4V4Zm0 6h16v10H4V10Zm2 2v6h12v-6H6Zm2 1.5h8v1.5H8v-1.5Zm0 2.5h5v1.5H8V16Z"/></svg>
+        Qurilma xotirasini tekshirish
+      </button>
+    </div>
+  </div>
+
+  <!-- Local IndexedDB outbox diagnostics -->
+  <div class="sheet-backdrop" id="outboxBackdrop" hidden></div>
+  <div class="sheet sheet--tall" id="outboxSheet" hidden role="dialog" aria-modal="true">
+    <div class="sheet__grip"><span class="sheet__handle" aria-hidden="true"></span></div>
+    <div class="sheet__top">
+      <span class="sheet__title">Qurilma xotirasi</span>
+      <button type="button" class="sheet__close" id="outboxClose" aria-label="Yopish">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12 5.7 5.7 4.3 7.1 10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+      </button>
+    </div>
+    <div class="sheet__pad">
+      <p class="outbox-note">
+        Bu oynada faqat shu qurilma va shu domain ichida vaqtincha saqlangan,
+        serverga hali tushmagan yozuvlar ko'rinadi.
+      </p>
+      <div class="outbox-actions">
+        <button type="button" class="btn btn--ghost" id="outboxRefresh">Yangilash</button>
+        <button type="button" class="btn btn--primary" id="outboxSync">Qayta yuborish</button>
+      </div>
+      <div class="outbox-summary" id="outboxSummary">Yuklanmoqda…</div>
+      <div class="outbox-list" id="outboxList"></div>
+    </div>
+  </div>
+
+  <!-- Entry actions (edit / delete) for a saved row -->
+  <div class="sheet-backdrop" id="entryActBackdrop" hidden></div>
+  <div class="sheet" id="entryActSheet" hidden role="dialog" aria-modal="true" aria-label="Amallar">
+    <div class="sheet__grip"><span class="sheet__handle" aria-hidden="true"></span></div>
+    <div class="sheet__pad">
+      <button type="button" class="act-item" id="entryEditBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25ZM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg>
+        Tahrirlash
+      </button>
+      <button type="button" class="act-item act-item--danger" id="entryDeleteBtn">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M9 3h6l1 2h4v2H4V5h4l1-2ZM6 8h12l-1 12a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L6 8Z"/></svg>
+        O'chirish
+      </button>
+    </div>
+  </div>
+
+  <!-- Faolligim (activity log) -->
+  <div class="screen" id="activityScreen" hidden>
+    <header class="screen__top">
+      <span class="screen__title">Faolligim</span>
+      <button type="button" class="sheet__close" id="activityClose" aria-label="Yopish">
+        <svg viewBox="0 0 24 24" class="ic"><path d="M18.3 5.7 12 12 5.7 5.7 4.3 7.1 10.6 13.4 4.3 19.7l1.4 1.4L12 14.8l6.3 6.3 1.4-1.4-6.3-6.3 6.3-6.3z"/></svg>
+      </button>
+    </header>
+    <div class="filter-bar">
+      <button type="button" class="filter-nav" id="actPrev" aria-label="Oldingi kun">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m15 6-6 6 6 6 1.4-1.4L11.8 12l4.6-4.6z"/></svg>
+      </button>
+      <input type="date" class="filter-date" id="actDate" />
+      <button type="button" class="filter-nav" id="actNext" aria-label="Keyingi kun">
+        <svg viewBox="0 0 24 24" class="ic"><path d="m9 6 6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z"/></svg>
+      </button>
+    </div>
+    <div class="screen__body" id="activityList"></div>
+  </div>
+
+  <!-- Browser login (username/password). Never shown inside Telegram. -->
+  <div class="login" id="loginScreen" hidden>
+    <div class="login__card">
+      <div class="login__logo">
+        <svg viewBox="0 0 24 24"><path d="M12 1a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1V6a5 5 0 0 0-5-5Zm3 8H9V6a3 3 0 0 1 6 0v3Zm-3 5a2 2 0 0 1 1 3.7V21h-2v-3.3A2 2 0 0 1 12 14Z"/></svg>
+      </div>
+      <h1 class="login__title">Reys hisoboti</h1>
+      <p class="login__sub">Davom etish uchun tizimga kiring</p>
+      <div class="login__passkey" id="passkeyLoginWrap" hidden>
+        <button type="button" class="btn btn--primary" id="passkeyLoginBtn">
+          <svg viewBox="0 0 24 24" class="ic"><path d="M14 2a6 6 0 0 0-5.6 8.2L2 16.6V22h5.4l1.2-1.2 1.4-1.4-1.2-1.2 1.6-1.6 1.4 1.4 1.6-1.6A6 6 0 1 0 14 2Zm2.5 5a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Z"/></svg>
+          Passkey bilan kirish
+        </button>
+        <div class="login__or"><span>yoki</span></div>
+      </div>
+      <form class="login__form" id="loginForm" autocomplete="on" novalidate>
+        <input
+          type="text" id="loginUser" class="input"
+          placeholder="Foydalanuvchi nomi"
+          autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false"
+          required
+        />
+        <div class="input-suffix">
+          <input
+            type="password" id="loginPass" class="input input--pin"
+            placeholder="4 xonali PIN" autocomplete="current-password"
+            inputmode="numeric" maxlength="4" pattern="[0-9]{4}"
+            aria-label="4 xonali PIN kod" required
+          />
+          <button type="button" class="pass-toggle" id="passToggle" aria-label="PINni ko'rsatish">
+            <svg viewBox="0 0 24 24" class="ic"><path d="M12 5c-5 0-9 4.5-10 7 1 2.5 5 7 10 7s9-4.5 10-7c-1-2.5-5-7-10-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z"/></svg>
+          </button>
+        </div>
+        <button type="submit" class="btn btn--primary" id="loginSubmit">Kirish</button>
+      </form>
+      <p class="login__error" id="loginError" hidden></p>
+    </div>
+  </div>
+
+  <script src="/js/app.js?v=outboxdiag1"></script>
+</body>
+</html>

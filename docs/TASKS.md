@@ -8,19 +8,15 @@
 - [ ] Create Pydantic v2 schemas for all API request/response DTOs.
 
 ## IN PROGRESS
-- [ ] Backend implementation of Reys Reports data endpoints and PostgreSQL tables.
+- [ ] Backend implementation of Cargo & Reys CRUD API endpoints, Excel date-range export generation, soft deletion (Recycle Bin 30-day retention), and PostgreSQL tables.
 
 ## DONE
 - [x] Phase 1: Initialize documentation framework (`docs/*`) and architecture specification.
-- [x] Phase A Frontend: Implement explicit React Router path routing for every view:
-  - `/reports` (Reports choice menu)
-  - `/reports/cargos` (Cargo list + FAB (+) modal)
-  - `/reports/cargos/:cargoId` (Cargo detail + top 3 reys collapsed list)
-  - `/reports/reys` (Direct all reys list)
-  - `/` (Dashboard)
-  - `/activity` (Activity audit log)
-  - `/login` (4-digit PIN code web auth)
-- [x] Phase A Frontend: Simplify Reys & Cargo cards to use `code` (`kodi`) as primary header.
+- [x] Phase A Frontend: Implement **Fast Mode Auto-Focus on Karobka Kodi** immediately after snapping/capturing photo or selecting from gallery.
+- [x] Phase A Frontend: Implement **Fullscreen Photo Lightbox Enlargement** for captured photos with zoom button, overlay, and discard/retake controls.
+- [x] Phase A Frontend: Remove square reticle overlay from camera viewfinder.
+- [x] Phase A Frontend: Replace raw checkbox with modern glassmorphism confirmation dialog asking if custom tare weight should be saved.
+- [x] Phase A Frontend: Standardize terminology across the application replacing "Brutto" with "Og'irlik" and "Tara" with "Karobka og'irligi".
 - [x] Phase A Frontend: Verify production build (`npm run build` passed with zero errors).
 
 ## Blocked

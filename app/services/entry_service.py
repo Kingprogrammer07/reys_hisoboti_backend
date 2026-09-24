@@ -112,19 +112,20 @@ class EntryService:
         gross = round(float(data.gross_weight), 3)
         tare = round(float(data.tare_weight or 0.0), 3)
 
-        # ADR-001 & ADR-002 Business rule validations
         if gross <= 0:
             raise ValueError("Umumiy og'irlik musbat bo'lishi kerak")
         if tare < 0:
             raise ValueError("Karobka og'irligi manfiy bo'lishi mumkin emas")
         if tare > 10.0:
             raise ValueError("Karobka og'irligi 10 kg dan oshmasligi kerak (ADR-001)")
-        if tare > 0.5 * gross:
+        if gross > 3.0 and tare > 0.5 * gross:
             raise ValueError("Karobka og'irligi umumiy og'irlikning 50% idan oshmasligi kerak (ADR-002)")
+        if tare >= gross:
+            raise ValueError("Karobka og'irligi umumiy og'irlikdan kichik bo'lishi kerak")
 
         net = round(gross - tare, 3)
-        if net < 0:
-            raise ValueError("Sof vazn manfiy bo'lishi mumkin emas")
+        if net <= 0:
+            raise ValueError("Sof vazn 0 dan katta bo'lishi kerak")
 
         # 1. Create Entry
         entry = await self.entry_repo.create(

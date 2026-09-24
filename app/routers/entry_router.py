@@ -66,6 +66,8 @@ async def create_entry(
     try:
         return await service.record_entry(payload, photos=photo_tuples)
     except ValueError as e:
+        import logging
+        logging.getLogger("reys.entry").warning("create_entry xatoligi: %s", e)
         raise HTTPException(status_code=400, detail=str(e))
 
 

@@ -162,7 +162,9 @@ async def sync_sqlite_to_neon() -> Dict[str, int]:
                 id=item.id,
                 reys_id=item.reys_id,
                 tovar_turi=item.tovar_turi,
-                balance_kg=item.balance_kg,
+                weight=item.weight,
+                package_count=getattr(item, "package_count", 0),
+                box_coefficient=getattr(item, "box_coefficient", 1.0),
                 updated_at=item.updated_at,
             ))
             stats["inventory"] += 1
@@ -222,7 +224,13 @@ async def sync_neon_to_sqlite():
             inv_items = (await n_session.execute(select(Inventory))).scalars().all()
             for item in inv_items:
                 await s_session.merge(Inventory(
-                    id=item.id, reys_id=item.reys_id, tovar_turi=item.tovar_turi, balance_kg=item.balance_kg, updated_at=item.updated_at
+                    id=item.id,
+                    reys_id=item.reys_id,
+                    tovar_turi=item.tovar_turi,
+                    weight=item.weight,
+                    package_count=getattr(item, "package_count", 0),
+                    box_coefficient=getattr(item, "box_coefficient", 1.0),
+                    updated_at=item.updated_at,
                 ))
             await s_session.commit()
     except Exception as exc:

@@ -180,10 +180,6 @@ def require_config() -> None:
     missing = []
     if not BOT_TOKEN:
         missing.append("BOT_TOKEN")
-    if not ADMIN_IDS:
-        missing.append("ADMIN_IDS")
-    if not WEBAPP_URL:
-        missing.append("WEBAPP_URL")
     if DATABASE_BACKEND == "postgres" and not DATABASE_URL:
         missing.append("DATABASE_URL")
     if PHOTO_STORAGE_BACKEND == "r2":
@@ -196,7 +192,6 @@ def require_config() -> None:
         if not CLOUDFLARE_R2_BUCKET:
             missing.append("CLOUDFLARE_R2_BUCKET")
     if missing:
-        raise RuntimeError(f"Missing required config: {', '.join(missing)} (see .env.example)")
-    # Telegram only opens Mini Apps over HTTPS.
-    if not WEBAPP_URL.startswith("https://"):
-        raise RuntimeError(f"WEBAPP_URL must be an https:// url, got: {WEBAPP_URL!r}")
+        raise RuntimeError(f"Server konfiguratsiyasida yetishmayotgan sozlamalar: {', '.join(missing)} (qarang: .env.example)")
+    if WEBAPP_URL and not (WEBAPP_URL.startswith("https://") or WEBAPP_URL.startswith("http://localhost") or WEBAPP_URL.startswith("http://127.0.0.1")):
+        raise RuntimeError(f"WEBAPP_URL https:// yoki http://localhost bo'lishi kerak, berildi: {WEBAPP_URL!r}")

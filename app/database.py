@@ -43,8 +43,9 @@ def get_async_database_url() -> str:
     elif scheme in ("sqlite", "sqlite3"):
         scheme = "sqlite+aiosqlite"
 
-    # asyncpg expects 'ssl' parameter instead of 'sslmode'
+    # asyncpg expects 'ssl' parameter instead of 'sslmode' and does not accept channel_binding
     query_params = parse_qs(parts.query)
+    query_params.pop("channel_binding", None)
     if "sslmode" in query_params:
         ssl_mode = query_params.pop("sslmode")[0]
         if ssl_mode in ("require", "verify-ca", "verify-full"):

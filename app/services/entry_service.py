@@ -33,7 +33,10 @@ class EntryService:
         for p in entry.photos:
             url: Optional[str] = None
             if p.storage_backend == "r2" and p.storage_key:
-                url = storage.public_url(p.storage_key)
+                pub = storage.public_url(p.storage_key)
+                # Only use external CDN url if it is NOT the raw private S3 API endpoint
+                if pub and "r2.cloudflarestorage.com" not in pub:
+                    url = pub
             if not url:
                 url = f"/api/entries/{entry.id}/photos/{p.idx}"
 

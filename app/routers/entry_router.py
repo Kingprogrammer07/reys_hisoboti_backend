@@ -138,7 +138,12 @@ async def get_entry_photo(
     if target_photo.storage_backend == "r2" and target_photo.storage_key:
         try:
             raw_bytes = storage.get_photo(target_photo.storage_key)
-            return Response(content=raw_bytes, media_type=target_photo.mime)
+            mime = target_photo.mime or "image/webp"
+            return Response(
+                content=raw_bytes,
+                media_type=mime,
+                headers={"Cache-Control": "public, max-age=31536000, immutable"},
+            )
         except Exception:
             pass
 

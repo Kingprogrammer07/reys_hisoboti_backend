@@ -80,3 +80,33 @@ async def test_uzbek_error_messages_on_api(client: httpx.AsyncClient):
     assert resp2.status_code == 400
     assert "allaqachon mavjud" in resp2.json()["detail"]
 
+
+@pytest.mark.asyncio
+async def test_auth_endpoints(client: httpx.AsyncClient):
+    from app import config
+    # 1. Login with wrong PIN -> 401
+    resp_bad = await client.post("/api/auth/login", json={"pin": "wrong_pin_9999"})
+    assert resp_bad.status_code == 401
+    assert "noto'g'ri" in resp_bad.json()["detail"]
+
+    # 2. Login with correct PIN -> 200
+    resp_ok = await client.post("/api/auth/login", json={"pin": config.ADMIN_PASSWORD})
+    assert resp_ok.status_code == 200
+    data = resp_ok.json()
+    assert data["ok"] is True
+    assert data["user"] == "admin"
+    assert "token" in data
+    token = data["token"]
+
+    # 3. Check /api/auth/me with Bearer token
+    resp_me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert resp_me.status_code == 200
+    me_data = resp_me.json()
+    assert me_data["authenticated"] is True
+    assert me_data["user"] == "admin"
+
+    # 4. Logout
+    resp_logout = await client.post("/api/auth/logout")
+    assert resp_logout.status_code == 200
+    assert resp_logout.json()["ok"] is True
+

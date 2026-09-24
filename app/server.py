@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
     db.init()
     await database.init_db()
     outbox.ensure_started()
+    storage.ensure_r2_cors()
     backup_scheduler.start_backup_scheduler()
     r2_sync_worker.start_r2_sync_worker()
     db_sync_worker.start_db_sync_worker()
@@ -86,6 +87,7 @@ if config.WEBAPP_URL:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -270,8 +272,8 @@ async def healthz() -> dict:
 # ---------------------------------------------------------------------------
 @app.post("/api/auth/login")
 async def login(request: Request):
-    """Browser sign-in with username/password -> signed session cookie."""
-    if not _rate_ok(f"login:{_client_ip(request)}", limit=8, window=60):
+    """Browser sign-in with username/password or PIN -> signed session cookie + token."""
+    if not _rate_ok(f"login:{_client_ip(request)}", limit=15, window=60):
         raise HTTPException(status_code=429, detail="Juda ko'p urinish. Birozdan keyin urinib ko'ring.")
 
     try:
@@ -279,21 +281,29 @@ async def login(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Noto'g'ri JSON formati")
 
-    username = str(data.get("username", "")).strip()
-    password = str(data.get("password", ""))
-    if not username or not password or not config.check_credentials(username, password):
-        # Generic message — don't reveal whether the username exists.
-        raise HTTPException(status_code=401, detail="Login yoki parol noto'g'ri")
+    username = str(data.get("username", "")).strip() or "admin"
+    password = str(data.get("password", "")).strip()
+    pin = str(data.get("pin", "")).strip()
+    if pin and not password:
+        password = pin
 
-    resp = JSONResponse({"ok": True, "user": username})
-    _set_session_cookie(resp, issue_session(username))
+    if not password or not config.check_credentials(username, password):
+        raise HTTPException(status_code=401, detail="Login yoki parol (PIN) noto'g'ri")
+
+    token = issue_session(username)
+    resp = JSONResponse({"ok": True, "user": username, "token": token})
+    _set_session_cookie(resp, token)
     log.info("browser login: user=%s", username)
     return resp
 
 
 @app.get("/api/auth/me")
 async def auth_me(request: Request) -> dict:
-    user = verify_session(request.cookies.get(SESSION_COOKIE, ""))
+    auth_header = request.headers.get("authorization", "")
+    token = request.cookies.get(SESSION_COOKIE, "")
+    if not token and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    user = verify_session(token)
     return {"authenticated": user is not None, "user": user}
 
 
@@ -305,7 +315,11 @@ async def logout():
 
 
 def _require_session(request: Request) -> str:
-    user = verify_session(request.cookies.get(SESSION_COOKIE, ""))
+    auth_header = request.headers.get("authorization", "")
+    token = request.cookies.get(SESSION_COOKIE, "")
+    if not token and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+    user = verify_session(token)
     if user is None:
         raise HTTPException(status_code=401, detail="Tizimga kirilmagan (Avtorizatsiya talab etiladi)")
     return user

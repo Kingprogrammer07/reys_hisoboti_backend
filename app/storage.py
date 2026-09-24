@@ -81,6 +81,33 @@ def _r2_client():
     )
 
 
+def ensure_r2_cors() -> bool:
+    """Ensure Cloudflare R2 bucket has CORS configured for browser access."""
+    if not r2_enabled():
+        return False
+    try:
+        client = _r2_client()
+        client.put_bucket_cors(
+            Bucket=config.CLOUDFLARE_R2_BUCKET,
+            CORSConfiguration={
+                "CORSRules": [
+                    {
+                        "AllowedHeaders": ["*"],
+                        "AllowedMethods": ["GET", "HEAD", "PUT", "POST", "DELETE"],
+                        "AllowedOrigins": ["*"],
+                        "ExposeHeaders": ["ETag", "Content-Type", "Content-Length"],
+                        "MaxAgeSeconds": 3600,
+                    }
+                ]
+            },
+        )
+        log.info("Cloudflare R2 CORS configuration applied successfully to bucket '%s'", config.CLOUDFLARE_R2_BUCKET)
+        return True
+    except Exception as exc:
+        log.warning("Could not set R2 CORS configuration: %s", exc)
+        return False
+
+
 def optimize_and_convert_to_webp(
     data: bytes,
     quality: int = 92,

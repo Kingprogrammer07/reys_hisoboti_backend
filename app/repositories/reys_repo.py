@@ -112,22 +112,37 @@ class ReysRepository:
         for entry in reys.entries:
             entry.deleted_at = None
         await self.session.flush()
+
+        # Recalculate totals
+        stmt = select(
+            func.coalesce(func.sum(Entry.net_weight), 0.0).label("net"),
+            func.coalesce(func.sum(Entry.tare_weight), 0.0).label("tare"),
+        ).where(
+            Entry.reys_id == reys_id,
+            Entry.deleted_at.is_(None),
+        )
+        res = (await self.session.execute(stmt)).one()
+        reys.toza_kg = round(float(res.net or 0.0), 3)
+        reys.karobka_plus_kg = round(float(res.tare or 0.0), 3)
+        await self.session.flush()
         return True
 
     async def recompute_totals(self, reys_id: int) -> Reys:
-        """Sum net_weight of active entries and update toza_kg."""
+        """Sum net_weight and tare_weight of active entries."""
         reys = await self.get_by_id(reys_id, include_deleted=True)
         if not reys:
             raise ValueError(f"Reys {reys_id} topilmadi")
 
-        stmt = select(func.coalesce(func.sum(Entry.net_weight), 0.0)).where(
+        stmt = select(
+            func.coalesce(func.sum(Entry.net_weight), 0.0).label("net"),
+            func.coalesce(func.sum(Entry.tare_weight), 0.0).label("tare"),
+        ).where(
             Entry.reys_id == reys_id,
             Entry.deleted_at.is_(None),
         )
-        result = await self.session.execute(stmt)
-        total_net = float(result.scalar_one())
-        
-        reys.toza_kg = round(total_net, 3)
+        res = (await self.session.execute(stmt)).one()
+        reys.toza_kg = round(float(res.net or 0.0), 3)
+        reys.karobka_plus_kg = round(float(res.tare or 0.0), 3)
         await self.session.flush()
         await self.session.refresh(reys)
         return reys

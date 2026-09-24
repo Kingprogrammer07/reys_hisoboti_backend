@@ -33,9 +33,9 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from . import config, database, db, db_guard, excel_export, outbox, passkeys, rules
+from . import config, database, db, db_guard, excel_export, outbox, passkeys, rules, storage
 from .routers import backup_router, bin_router, cargo_router, entry_router, inventory_router, reys_router
-from .services import backup_scheduler
+from .services import backup_scheduler, db_sync_worker, r2_sync_worker
 from .security import (
     InitDataError,
     authenticate_admin,
@@ -61,7 +61,11 @@ async def lifespan(app: FastAPI):
     await database.init_db()
     outbox.ensure_started()
     backup_scheduler.start_backup_scheduler()
+    r2_sync_worker.start_r2_sync_worker()
+    db_sync_worker.start_db_sync_worker()
     yield
+    db_sync_worker.stop_db_sync_worker()
+    r2_sync_worker.stop_r2_sync_worker()
     backup_scheduler.stop_backup_scheduler()
     await database.close_db()
 
@@ -93,6 +97,25 @@ app.include_router(entry_router)
 app.include_router(bin_router)
 app.include_router(inventory_router)
 app.include_router(backup_router)
+
+
+@app.get("/api/system/health")
+async def get_system_health():
+    """Return live status of Neon DB, SQLite fallback, R2 storage, and sync workers."""
+    db_status = db_sync_worker.get_database_status()
+    neon_online = await db_sync_worker.check_neon_health() if config.DATABASE_BACKEND == "postgres" else False
+    db_status["neon_online"] = neon_online
+
+    return {
+        "status": "healthy",
+        "database": db_status,
+        "storage": {
+            "backend": config.PHOTO_STORAGE_BACKEND,
+            "r2_enabled": storage.r2_enabled(),
+            "r2_bucket": config.CLOUDFLARE_R2_BUCKET,
+        },
+        "backup": backup_scheduler.get_last_backup_info(),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -85,8 +85,16 @@ async_session_factory = async_sessionmaker(
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency yielding an async SQLAlchemy session."""
-    async with async_session_factory() as session:
+    """FastAPI dependency yielding an async SQLAlchemy session with instant failover."""
+    from .services import db_sync_worker
+
+    status = db_sync_worker.get_database_status()
+    if status.get("active_mode") == "sqlite" and config.DATABASE_BACKEND == "postgres":
+        factory = db_sync_worker.get_sqlite_fallback_factory()
+    else:
+        factory = async_session_factory
+
+    async with factory() as session:
         try:
             yield session
             await session.commit()

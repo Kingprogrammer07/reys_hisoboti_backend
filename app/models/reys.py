@@ -33,7 +33,7 @@ class Reys(Base):
     deleted_at: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
 
     # Relationships
-    cargo: Mapped[Optional[Cargo]] = relationship("Cargo", back_populates="reyslar")
+    cargo: Mapped[Optional[Cargo]] = relationship("Cargo", back_populates="reyslar", lazy="selectin")
     entries: Mapped[List[Entry]] = relationship(
         "Entry",
         back_populates="reys",

@@ -1,14 +1,35 @@
-"""Photo object storage.
+"""Photo object storage and WebP optimization.
 
 Cloudflare R2 is S3-compatible, so boto3 can talk to it through the account
 endpoint. The module is lazy: local SQLite/disk fallback still works without
 R2 credentials.
+
+Features:
+- WebP automatic conversion with 90-95% quality (standard: 92%).
+- Apple iOS HEIC / HEIF format auto-decoding via pillow-heif.
+- EXIF auto-rotation to fix sideways/upside-down phone photos.
+- Highly organized, intuitive Cloudflare R2 folder hierarchy:
+    prefix/kargolar/{cargo_code}/{reys_code}/{box_code}_foto_{idx+1}.webp
+    or prefix/reyslar/{reys_code}/{box_code}_foto_{idx+1}.webp
+    or prefix/yozuvlar/partiya_{entry_id}/{box_code}_foto_{idx+1}.webp
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+import io
+import logging
+from typing import Optional, Tuple
+
+from PIL import Image, ImageOps
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except Exception:
+    pass
 
 from . import config
+
+log = logging.getLogger("reys.storage")
 
 
 @dataclass(frozen=True)
@@ -60,28 +81,132 @@ def _r2_client():
     )
 
 
-def photo_key(entry_id: int, idx: int) -> str:
-    prefix = config.CLOUDFLARE_R2_PREFIX
-    base = f"entries/{int(entry_id)}/{int(idx)}"
+def optimize_and_convert_to_webp(
+    data: bytes,
+    quality: int = 92,
+    max_dimension: int = 2560,
+) -> Tuple[bytes, str]:
+    """Convert any photo (JPEG, PNG, iOS HEIC/HEIF, WEBP) to WebP format.
+    
+    - Corrects EXIF rotation (prevents sideways phone photos).
+    - Preserves alpha transparency when needed.
+    - Compresses with 90-95% quality (default: 92%).
+    - Caps dimension at 2560px to preserve performance on mobile devices.
+    Returns: (webp_bytes, 'image/webp').
+    """
+    if not data:
+        return data, "image/webp"
+
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            # 1. Correct orientation according to EXIF tags
+            try:
+                img = ImageOps.exif_transpose(img)
+            except Exception:
+                pass
+
+            # 2. Color mode handling
+            if img.mode in ("RGBA", "LA", "P"):
+                if img.mode == "P":
+                    img = img.convert("RGBA")
+            else:
+                img = img.convert("RGB")
+
+            # 3. Prevent huge 48MP+ mobile photos from overloading clients
+            w, h = img.size
+            if max(w, h) > max_dimension:
+                scale = max_dimension / float(max(w, h))
+                new_size = (int(w * scale), int(h * scale))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+            # 4. Save as WebP
+            buf = io.BytesIO()
+            img.save(
+                buf,
+                format="WEBP",
+                quality=max(80, min(100, quality)),
+                method=4,
+            )
+            return buf.getvalue(), "image/webp"
+    except Exception as exc:
+        log.warning("Image WebP conversion failed: %s, using original bytes", exc)
+        return data, "image/jpeg"
+
+
+def photo_key(
+    entry_id: int,
+    idx: int,
+    cargo_code: str = "",
+    reys_code: str = "",
+    box_code: str = "",
+    ext: str = "webp",
+) -> str:
+    """Generate a clean, intuitive, folder-structured S3/R2 object key.
+    
+    Hierarchy in R2:
+    - With Cargo & Reys:  kargolar/{cargo_code}/{reys_code}/{box_code}_foto_{idx+1}.webp
+    - With Reys only:     reyslar/{reys_code}/{box_code}_foto_{idx+1}.webp
+    - Fallback:           yozuvlar/partiya_{entry_id}/{box_code}_foto_{idx+1}.webp
+    """
+    prefix = (config.CLOUDFLARE_R2_PREFIX or "").strip("/")
+
+    def _sanitize(val: str, fallback: str) -> str:
+        s = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in (val or "").strip())
+        cleaned = s.strip("._-")
+        return cleaned if cleaned else fallback
+
+    clean_box = _sanitize(box_code, f"quti_{entry_id}")
+    file_name = f"{clean_box}_foto_{idx + 1}.{ext}"
+
+    if cargo_code and reys_code:
+        c_code = _sanitize(cargo_code, "noma'lum_kargo")
+        r_code = _sanitize(reys_code, f"reys_{entry_id}")
+        base = f"kargolar/{c_code}/{r_code}/{file_name}"
+    elif reys_code:
+        r_code = _sanitize(reys_code, f"reys_{entry_id}")
+        base = f"reyslar/{r_code}/{file_name}"
+    else:
+        base = f"yozuvlar/partiya_{entry_id}/{file_name}"
+
     return f"{prefix}/{base}" if prefix else base
 
 
-def put_photo(entry_id: int, idx: int, data: bytes, mime: str) -> StoredPhoto | None:
-    """Store photo in R2 when enabled; return None for SQLite fallback."""
+def put_photo(
+    entry_id: int,
+    idx: int,
+    data: bytes,
+    mime: str = "image/jpeg",
+    cargo_code: str = "",
+    reys_code: str = "",
+    box_code: str = "",
+    quality: int = 92,
+) -> StoredPhoto | None:
+    """Optimize, convert to WebP, and store photo in Cloudflare R2."""
     if not r2_enabled():
         return None
-    key = photo_key(entry_id, idx)
+
+    # Convert to WebP (90-95% quality)
+    webp_data, webp_mime = optimize_and_convert_to_webp(data, quality=quality)
+    key = photo_key(
+        entry_id=entry_id,
+        idx=idx,
+        cargo_code=cargo_code,
+        reys_code=reys_code,
+        box_code=box_code,
+        ext="webp",
+    )
+
     resp = _r2_client().put_object(
         Bucket=config.CLOUDFLARE_R2_BUCKET,
         Key=key,
-        Body=data,
-        ContentType=mime or "image/jpeg",
-        CacheControl="private, max-age=86400",
+        Body=webp_data,
+        ContentType=webp_mime,
+        CacheControl="public, max-age=31536000, immutable",
     )
     return StoredPhoto(
         backend="r2",
         key=key,
-        size=len(data),
+        size=len(webp_data),
         etag=(resp.get("ETag") or "").strip('"') or None,
     )
 

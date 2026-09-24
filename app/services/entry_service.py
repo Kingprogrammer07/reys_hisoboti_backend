@@ -11,6 +11,7 @@ from .. import config, storage
 from ..models.activity import ActivityLog
 from ..models.entry import Entry
 from ..models.outbox import SendQueue
+from ..repositories.cargo_repo import CargoRepository
 from ..repositories.entry_repo import EntryRepository
 from ..repositories.inventory_repo import InventoryRepository
 from ..repositories.reys_repo import ReysRepository
@@ -20,6 +21,7 @@ from ..schemas.entry import EntryCreate, EntryResponse, PhotoMetadata
 class EntryService:
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.cargo_repo = CargoRepository(session)
         self.entry_repo = EntryRepository(session)
         self.reys_repo = ReysRepository(session)
         self.inv_repo = InventoryRepository(session)
@@ -135,25 +137,45 @@ class EntryService:
 
         # 2. Persist Photos
         photos_list = photos or []
-        for idx, (photo_bytes, mime) in enumerate(photos_list):
+        reys_code = reys.code if reys else f"reys_{data.reys_id}"
+        cargo_code = ""
+        if reys and reys.cargo_id:
+            cargo_obj = await self.cargo_repo.get_by_id(reys.cargo_id)
+            if cargo_obj:
+                cargo_code = cargo_obj.code
+
+        for idx, (raw_bytes, raw_mime) in enumerate(photos_list):
+            # WebP ga 92% sifat bilan o'girish (iOS HEIC/PNG/JPG barchasini qo'llaydi)
+            photo_bytes, mime = storage.optimize_and_convert_to_webp(raw_bytes, quality=92)
+
             stored_backend = "disk"
             stored_key: Optional[str] = None
 
             if storage.r2_enabled():
                 try:
-                    res = storage.put_photo(entry.id, idx, photo_bytes, mime)
+                    res = storage.put_photo(
+                        entry_id=entry.id,
+                        idx=idx,
+                        data=photo_bytes,
+                        mime=mime,
+                        cargo_code=cargo_code,
+                        reys_code=reys_code,
+                        box_code=entry.box_code,
+                        quality=92,
+                    )
                     if res:
                         stored_backend = "r2"
                         stored_key = res.key
-                except Exception:
+                except Exception as exc:
+                    log.warning("R2 saqlashda xatolik (%s), diskka saqlanmoqda", exc)
                     stored_backend = "disk"
 
             if stored_backend == "disk":
                 photo_dir = config.DATA_DIR / "photos" / str(entry.id)
                 photo_dir.mkdir(parents=True, exist_ok=True)
-                photo_path = photo_dir / str(idx)
+                photo_path = photo_dir / f"{idx}.webp"
                 photo_path.write_bytes(photo_bytes)
-                stored_key = f"photos/{entry.id}/{idx}"
+                stored_key = f"photos/{entry.id}/{idx}.webp"
 
             await self.entry_repo.add_photo(
                 entry_id=entry.id,

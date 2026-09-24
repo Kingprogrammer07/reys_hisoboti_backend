@@ -142,8 +142,10 @@ async def get_entry_photo(
         except Exception:
             pass
 
-    # Disk fallback
-    photo_path = config.DATA_DIR / "photos" / str(entry_id) / str(idx)
+    # Disk fallback (checks both .webp and legacy path)
+    photo_path = config.DATA_DIR / "photos" / str(entry_id) / f"{idx}.webp"
+    if not photo_path.exists():
+        photo_path = config.DATA_DIR / "photos" / str(entry_id) / str(idx)
     if photo_path.exists():
         return FileResponse(path=str(photo_path), media_type=target_photo.mime)
 

@@ -16,44 +16,45 @@ from ..models.reys import Reys
 router = APIRouter(tags=["dashboard"])
 
 
+_stats_cache: tuple[float, Dict[str, Any]] | None = None
+
+
+def invalidate_dashboard_cache() -> None:
+    global _stats_cache
+    _stats_cache = None
+
+
 @router.get("/api/dashboard/stats")
 async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -> Dict[str, Any]:
-    # 1. Total net weight across all active entries
-    net_weight_res = await session.execute(
-        select(func.coalesce(func.sum(Entry.net_weight), 0.0)).where(Entry.deleted_at.is_(None))
-    )
-    total_net_weight = round(float(net_weight_res.scalar_one_or_none() or 0.0), 2)
+    global _stats_cache
+    now_mono = time.monotonic()
+    if _stats_cache is not None and (now_mono - _stats_cache[0]) < 3.0:
+        return _stats_cache[1]
 
-    # 2. Total entries count
-    entries_count_res = await session.execute(
-        select(func.count(Entry.id)).where(Entry.deleted_at.is_(None))
-    )
-    total_entries_count = int(entries_count_res.scalar_one_or_none() or 0)
-
-    # 3. Active Cargos and Reys counts
-    cargos_count_res = await session.execute(
-        select(func.count(Cargo.id)).where(Cargo.deleted_at.is_(None))
-    )
-    cargos_count = int(cargos_count_res.scalar_one_or_none() or 0)
-
-    reys_count_res = await session.execute(
-        select(func.count(Reys.id)).where(Reys.deleted_at.is_(None))
-    )
-    reys_count = int(reys_count_res.scalar_one_or_none() or 0)
-
-    # 4. Today's added net weight (Tashkent timezone UTC+5)
+    # Calculate Tashkent today timestamp (UTC+5)
     now_ts = int(time.time())
     now_dt = datetime.datetime.fromtimestamp(now_ts, tz=datetime.timezone(datetime.timedelta(hours=5)))
     today_start_dt = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     today_start_ts = int(today_start_dt.timestamp())
 
-    today_weight_res = await session.execute(
+    # Combined single query for 5 high-level metrics
+    metrics_stmt = select(
+        select(func.coalesce(func.sum(Entry.net_weight), 0.0)).where(Entry.deleted_at.is_(None)).scalar_subquery().label("total_net_weight"),
+        select(func.count(Entry.id)).where(Entry.deleted_at.is_(None)).scalar_subquery().label("total_entries_count"),
+        select(func.count(Cargo.id)).where(Cargo.deleted_at.is_(None)).scalar_subquery().label("cargos_count"),
+        select(func.count(Reys.id)).where(Reys.deleted_at.is_(None)).scalar_subquery().label("reys_count"),
         select(func.coalesce(func.sum(Entry.net_weight), 0.0)).where(
             Entry.deleted_at.is_(None),
             Entry.created_at >= today_start_ts,
-        )
+        ).scalar_subquery().label("today_added_kg"),
     )
-    today_added_kg = round(float(today_weight_res.scalar_one_or_none() or 0.0), 2)
+    metrics_row = (await session.execute(metrics_stmt)).one()
+
+    total_net_weight = round(float(metrics_row.total_net_weight or 0.0), 2)
+    total_entries_count = int(metrics_row.total_entries_count or 0)
+    cargos_count = int(metrics_row.cargos_count or 0)
+    reys_count = int(metrics_row.reys_count or 0)
+    today_added_kg = round(float(metrics_row.today_added_kg or 0.0), 2)
 
     # 5. Inventory summary (group by tovar_turi)
     inv_stmt = (
@@ -103,7 +104,7 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -
             "created_at": dt_str,
         })
 
-    return {
+    result = {
         "status": "success",
         "total_net_weight": total_net_weight,
         "total_entries_count": total_entries_count,
@@ -114,6 +115,8 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -
         "inventory": inventory_items,
         "recent_activities": activities,
     }
+    _stats_cache = (now_mono, result)
+    return result
 
 
 @router.get("/api/activities")

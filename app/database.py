@@ -59,14 +59,14 @@ ASYNC_DATABASE_URL = get_async_database_url()
 
 _engine_kwargs: dict = {
     "echo": False,
-    "pool_pre_ping": True,
+    "pool_pre_ping": False,
 }
 
 if ASYNC_DATABASE_URL.startswith("postgresql+asyncpg"):
     _engine_kwargs.update({
-        "pool_size": 10,
-        "max_overflow": 20,
-        "pool_recycle": 300,
+        "pool_size": 15,
+        "max_overflow": 25,
+        "pool_recycle": 600,
         "connect_args": {"server_settings": {"application_name": "mandarin_reys_hisobot"}},
     })
 elif ASYNC_DATABASE_URL.startswith("sqlite+aiosqlite"):

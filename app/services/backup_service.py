@@ -272,16 +272,16 @@ async def send_backup_to_telegram(
     file_path: Path,
     caption: Optional[str] = None,
     channel_id: Optional[Any] = None,
-) -> bool:
+) -> Tuple[bool, Optional[str]]:
     """Send a backup .dump file to the configured Telegram channel."""
     if not config.BOT_TOKEN:
         log.warning("BOT_TOKEN mavjud emas, Telegramga zaxira yuborilmadi.")
-        return False
+        return False, "BOT_TOKEN sozlanmagan"
 
     target_chat = channel_id if channel_id is not None else config.BACKUP_CHANNEL_ID
     if not target_chat:
         log.warning("BOT_BACKUP_CHANNEL_ID sozlanmagan, zaxira yuborilmadi.")
-        return False
+        return False, "BOT_BACKUP_CHANNEL_ID sozlanmagan"
 
     # Normalize channel id (e.g. 1002982052676 -> -1002982052676)
     if isinstance(target_chat, int) and target_chat > 10_000_000_000:
@@ -299,10 +299,16 @@ async def send_backup_to_telegram(
             caption=caption or f"📦 Mandarin Reys Hisoboti Zaxira Nusxasi: {file_path.name}",
         )
         log.info("Backup successfully delivered to Telegram channel %s", target_chat)
-        return True
+        return True, None
     except Exception as exc:
-        log.error("Telegramga zaxira yuborishda xatolik: %s", exc)
-        return False
+        err_msg = str(exc)
+        log.error("Telegramga zaxira yuborishda xatolik: %s", err_msg)
+        if "chat not found" in err_msg.lower():
+            err_msg = (
+                f"Kanal topilmadi ({target_chat}). Iltimos, Telegram botingizni kanalga "
+                f"Administrator qilib qo'shing va xabar yuborish huquqini bering!"
+            )
+        return False, err_msg
     finally:
         await bot.session.close()
 

@@ -83,10 +83,11 @@ async def send_backup_now() -> Dict[str, Any]:
     """Manually trigger backup creation and delivery to Telegram channel."""
     try:
         result = await backup_scheduler.run_backup_job()
-        if result.get("last_status") == "failed":
+        if not result.get("telegram_sent"):
+            err_msg = result.get("last_error") or "Telegram kanalga yetkazib berilmadi."
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Telegramga zaxira yuborishda xatolik: {result.get('last_error')}",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Zaxira nusxasi yaratildi ({result.get('last_file')}), ammo Telegramga yetkazilmadi: {err_msg}",
             )
         return {
             "status": "success",

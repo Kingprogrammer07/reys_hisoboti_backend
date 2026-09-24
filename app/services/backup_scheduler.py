@@ -48,7 +48,7 @@ async def run_backup_job() -> Dict[str, Any]:
         )
 
         # Send to Telegram backup channel (e.g. 1002982052676 / -1002982052676)
-        sent = await backup_service.send_backup_to_telegram(
+        sent, send_err = await backup_service.send_backup_to_telegram(
             file_path=dest_path,
             caption=caption,
         )
@@ -56,13 +56,13 @@ async def run_backup_job() -> Dict[str, Any]:
         _last_backup_info = {
             "last_run": now_dt.isoformat(),
             "last_file": dest_path.name,
-            "last_status": "success",
-            "last_error": None,
+            "last_status": "success" if sent else "telegram_failed",
+            "last_error": send_err,
             "file_size": file_size,
             "telegram_sent": sent,
             "stats": stats,
         }
-        log.info("Backup job completed successfully: %s (Telegram sent: %s)", dest_path.name, sent)
+        log.info("Backup job completed: %s (Telegram sent: %s, error: %s)", dest_path.name, sent, send_err)
         return _last_backup_info
 
     except Exception as exc:

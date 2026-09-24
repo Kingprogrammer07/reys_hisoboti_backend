@@ -34,7 +34,7 @@ from webauthn.helpers.structs import (
 )
 
 from . import config, database, db, db_guard, excel_export, outbox, passkeys, rules, storage
-from .routers import backup_router, bin_router, cargo_router, entry_router, inventory_router, reys_router
+from .routers import backup_router, bin_router, cargo_router, dashboard_router, entry_router, inventory_router, reys_router
 from .services import backup_scheduler, db_sync_worker, r2_sync_worker
 from .security import (
     InitDataError,
@@ -97,6 +97,7 @@ app.include_router(entry_router)
 app.include_router(bin_router)
 app.include_router(inventory_router)
 app.include_router(backup_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/api/system/health")

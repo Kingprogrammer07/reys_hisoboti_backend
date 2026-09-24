@@ -7,6 +7,8 @@ Auth model:
 """
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 import json as _json
 import logging
 import time
@@ -15,6 +17,7 @@ from urllib.parse import quote, urlparse
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from webauthn import (
     generate_authentication_options,
     generate_registration_options,
@@ -30,7 +33,8 @@ from webauthn.helpers.structs import (
     UserVerificationRequirement,
 )
 
-from . import config, db, db_guard, excel_export, outbox, passkeys, rules
+from . import config, database, db, db_guard, excel_export, outbox, passkeys, rules
+from .routers import bin_router, cargo_router, entry_router, inventory_router, reys_router
 from .security import (
     InitDataError,
     authenticate_admin,
@@ -49,7 +53,42 @@ _CHUNK = 64 * 1024
 
 SESSION_COOKIE = "reys_session"
 
-app = FastAPI(title="Reys hisoboti")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    config.require_config()
+    db.init()
+    await database.init_db()
+    outbox.ensure_started()
+    yield
+    await database.close_db()
+
+
+app = FastAPI(title="Reys hisoboti", lifespan=lifespan)
+
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+]
+if config.WEBAPP_URL:
+    _cors_origins.append(config.WEBAPP_URL)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(cargo_router)
+app.include_router(reys_router)
+app.include_router(entry_router)
+app.include_router(bin_router)
+app.include_router(inventory_router)
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +154,14 @@ def _same_origin(request: Request) -> bool:
     src = request.headers.get("origin") or request.headers.get("referer")
     if not src:
         return False  # a browser sends Origin on cross-origin POST; absence is suspicious
-    return urlparse(src).netloc == host
+    netloc = urlparse(src).netloc
+    allowed = {host, "localhost:5173", "127.0.0.1:5173", "localhost:3000", "127.0.0.1:3000"}
+    if config.WEBAPP_URL:
+        try:
+            allowed.add(urlparse(config.WEBAPP_URL).netloc)
+        except Exception:
+            pass
+    return netloc in allowed
 
 
 def _set_session_cookie(resp: JSONResponse, token: str) -> None:
@@ -130,14 +176,20 @@ def _set_session_cookie(resp: JSONResponse, token: str) -> None:
     )
 
 
-@app.on_event("startup")
+# @app.on_event("startup")
 async def _startup() -> None:
     # Enforce required config even when launched via `uvicorn app.server:app`
     # (bypassing app/__main__.py). Prevents a fail-open empty-token deploy.
     config.require_config()
     db.init()
+    await database.init_db()
     # Drain any queued channel sends (idles until a bot is set by __main__).
     outbox.ensure_started()
+
+
+# @app.on_event("shutdown")
+async def _shutdown() -> None:
+    await database.close_db()
 
 
 # Static assets (css/, js/).

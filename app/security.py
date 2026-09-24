@@ -38,14 +38,14 @@ def validate_init_data(init_data: str, bot_token: str = "") -> WebAppUser:
     if not token:
         # Fail closed: an empty token yields a publicly-derivable secret key,
         # which would let anyone forge a valid signature.
-        raise InitDataError("server misconfigured: empty bot token")
+        raise InitDataError("Server sozlamalarida xatolik: bot tokeni ko'rsatilmagan")
     if not init_data:
-        raise InitDataError("empty init_data")
+        raise InitDataError("Telegram ma'lumotlari bo'sh")
 
     pairs = dict(parse_qsl(init_data, keep_blank_values=True))
     received_hash = pairs.pop("hash", None)
     if not received_hash:
-        raise InitDataError("missing hash")
+        raise InitDataError("Xavfsizlik tekshiruvi (hash) mavjud emas")
 
     # data_check_string: all fields except hash, sorted by key, joined by \n.
     data_check_string = "\n".join(f"{k}={pairs[k]}" for k in sorted(pairs))
@@ -54,7 +54,7 @@ def validate_init_data(init_data: str, bot_token: str = "") -> WebAppUser:
     computed_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
     if not hmac.compare_digest(computed_hash, received_hash):
-        raise InitDataError("bad signature")
+        raise InitDataError("Yaroqsiz imzo (HMAC) — soxtalashtirilgan so'rov")
 
     # Optional freshness / replay protection.
     if config.INITDATA_MAX_AGE > 0:
@@ -63,15 +63,15 @@ def validate_init_data(init_data: str, bot_token: str = "") -> WebAppUser:
         except ValueError:
             auth_date = 0
         if auth_date <= 0 or (time.time() - auth_date) > config.INITDATA_MAX_AGE:
-            raise InitDataError("init_data expired")
+            raise InitDataError("Sessiya muddati tugagan")
 
     user_raw = pairs.get("user")
     if not user_raw:
-        raise InitDataError("missing user")
+        raise InitDataError("Foydalanuvchi ma'lumotlari topilmadi")
     try:
         user = json.loads(user_raw)
     except json.JSONDecodeError as exc:
-        raise InitDataError("invalid user json") from exc
+        raise InitDataError("Foydalanuvchi JSON ma'lumoti noto'g'ri") from exc
 
     return WebAppUser(
         id=int(user["id"]),
@@ -85,7 +85,7 @@ def authenticate_admin(init_data: str) -> WebAppUser:
     """Validate initData and ensure the user is an allowed admin."""
     user = validate_init_data(init_data)
     if not config.is_admin(user.id):
-        raise InitDataError("not authorized")
+        raise InitDataError("Ruxsat berilmagan (Administrator emassiz)")
     return user
 
 

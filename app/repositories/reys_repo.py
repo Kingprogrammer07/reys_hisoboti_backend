@@ -118,7 +118,7 @@ class ReysRepository:
         """Sum net_weight of active entries and update toza_kg."""
         reys = await self.get_by_id(reys_id, include_deleted=True)
         if not reys:
-            raise ValueError(f"Reys {reys_id} not found")
+            raise ValueError(f"Reys {reys_id} topilmadi")
 
         stmt = select(func.coalesce(func.sum(Entry.net_weight), 0.0)).where(
             Entry.reys_id == reys_id,

@@ -59,3 +59,24 @@ async def test_cors_headers(client: httpx.AsyncClient):
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
     assert resp.headers.get("access-control-allow-credentials") == "true"
+
+
+@pytest.mark.asyncio
+async def test_uzbek_error_messages_on_api(client: httpx.AsyncClient):
+    # 1. 404 Cargo Not Found in Uzbek
+    resp = await client.get("/api/cargos/999999")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Kargo topilmadi"
+
+    # 2. 404 Reys Not Found in Uzbek
+    resp = await client.get("/api/reys/999999")
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Reys topilmadi"
+
+    # 3. 400 Duplicate Cargo error in Uzbek
+    resp1 = await client.post("/api/cargos", json={"code": "DUPLICATE-UZBEK"})
+    assert resp1.status_code == 201
+    resp2 = await client.post("/api/cargos", json={"code": "DUPLICATE-UZBEK"})
+    assert resp2.status_code == 400
+    assert "allaqachon mavjud" in resp2.json()["detail"]
+

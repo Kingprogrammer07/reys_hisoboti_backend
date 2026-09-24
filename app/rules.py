@@ -142,7 +142,7 @@ def validate_photo_count(count: int, *, required: bool, label: str = "rasm") -> 
     if required and count <= 0:
         raise RuleError(f"kamida 1 ta {label} qo'shing")
     if count > MAX_PHOTOS:
-        raise RuleError(f"max {MAX_PHOTOS} photos", status_code=413)
+        raise RuleError(f"Maksimal {MAX_PHOTOS} ta rasm yuklash mumkin", status_code=413)
 
 
 def reys_payload(

@@ -206,9 +206,9 @@ async def _read_capped(upload: UploadFile, remaining_total: int) -> bytes:
             break
         buf.extend(chunk)
         if len(buf) > MAX_PHOTO_BYTES:
-            raise HTTPException(status_code=413, detail="photo too large")
+            raise HTTPException(status_code=413, detail="Rasm hajmi belgilangan cheklovdan oshib ketdi")
         if len(buf) > remaining_total:
-            raise HTTPException(status_code=413, detail="upload too large")
+            raise HTTPException(status_code=413, detail="Yuklanayotgan fayllar hajmi juda katta")
     return bytes(buf)
 
 
@@ -249,7 +249,7 @@ async def login(request: Request):
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid json")
+        raise HTTPException(status_code=400, detail="Noto'g'ri JSON formati")
 
     username = str(data.get("username", "")).strip()
     password = str(data.get("password", ""))
@@ -279,7 +279,7 @@ async def logout():
 def _require_session(request: Request) -> str:
     user = verify_session(request.cookies.get(SESSION_COOKIE, ""))
     if user is None:
-        raise HTTPException(status_code=401, detail="not authenticated")
+        raise HTTPException(status_code=401, detail="Tizimga kirilmagan (Avtorizatsiya talab etiladi)")
     return user
 
 
@@ -289,7 +289,7 @@ def _require_session(request: Request) -> str:
 @app.post("/api/webauthn/register/begin")
 async def wa_register_begin(request: Request):
     if not config.WEBAUTHN_RP_ID:
-        raise HTTPException(status_code=400, detail="webauthn not configured")
+        raise HTTPException(status_code=400, detail="Biometrik kirish (WebAuthn) sozlanmagan")
     user = _require_session(request)  # must be logged in (password) to enroll
     exclude = [
         PublicKeyCredentialDescriptor(id=base64url_to_bytes(c["credential_id"]))
@@ -317,7 +317,7 @@ async def wa_register_complete(request: Request):
     body = await request.json()
     rec = passkeys.take_challenge(body.get("challenge_id", ""))
     if not rec or rec.get("user") != user:
-        raise HTTPException(status_code=400, detail="challenge expired")
+        raise HTTPException(status_code=400, detail="Tasdiqlash muddati tugagan. Qaytadan urinib ko'ring.")
     try:
         ver = verify_registration_response(
             credential=body.get("credential"),
@@ -328,7 +328,7 @@ async def wa_register_complete(request: Request):
         )
     except Exception as exc:  # noqa: BLE001
         log.info("passkey register failed for %s: %s", user, exc)
-        raise HTTPException(status_code=400, detail="registration failed")
+        raise HTTPException(status_code=400, detail="Ro'yxatdan o'tishda xatolik yuz berdi")
 
     transports = []
     try:
@@ -349,9 +349,9 @@ async def wa_register_complete(request: Request):
 @app.post("/api/webauthn/auth/begin")
 async def wa_auth_begin(request: Request):
     if not config.WEBAUTHN_RP_ID:
-        raise HTTPException(status_code=400, detail="webauthn not configured")
+        raise HTTPException(status_code=400, detail="Biometrik kirish (WebAuthn) sozlanmagan")
     if not _rate_ok(f"walogin:{_client_ip(request)}", limit=15, window=60):
-        raise HTTPException(status_code=429, detail="too many attempts")
+        raise HTTPException(status_code=429, detail="Juda ko'p urinish. Birozdan keyin urinib ko'ring.")
     opts = generate_authentication_options(
         rp_id=config.WEBAUTHN_RP_ID,
         user_verification=UserVerificationRequirement.REQUIRED,
@@ -365,15 +365,15 @@ async def wa_auth_complete(request: Request):
     body = await request.json()
     rec = passkeys.take_challenge(body.get("challenge_id", ""))
     if not rec:
-        raise HTTPException(status_code=400, detail="challenge expired")
+        raise HTTPException(status_code=400, detail="Tasdiqlash muddati tugagan. Qaytadan urinib ko'ring.")
 
     cred = body.get("credential") or {}
     stored = passkeys.find_by_id(cred.get("id") or cred.get("rawId"))
     if not stored:
-        raise HTTPException(status_code=403, detail="unknown passkey")
+        raise HTTPException(status_code=403, detail="Noma'lum passkey kaliti")
     # The passkey's account must still exist.
     if not config.has_credential(stored["username"]):
-        raise HTTPException(status_code=403, detail="account disabled")
+        raise HTTPException(status_code=403, detail="Hisob faol emas yoki bloklangan")
 
     try:
         ver = verify_authentication_response(
@@ -387,7 +387,7 @@ async def wa_auth_complete(request: Request):
         )
     except Exception as exc:  # noqa: BLE001
         log.info("passkey auth failed: %s", exc)
-        raise HTTPException(status_code=403, detail="verification failed")
+        raise HTTPException(status_code=403, detail="Tasdiqlash muvaffaqiyatsiz tugadi")
 
     passkeys.update_sign_count(stored["credential_id"], ver.new_sign_count)
     resp = JSONResponse({"ok": True, "user": stored["username"]})
@@ -407,10 +407,10 @@ def _identity(request: Request, init_data: str = "", state_changing: bool = True
     if idata:
         return f"tg:{authenticate_admin(idata).id}"  # raises on failure
     if state_changing and not _same_origin(request):
-        raise InitDataError("bad origin")
+        raise InitDataError("Yaroqsiz so'rov manbasi (CSRF himoyasi)")
     user = verify_session(request.cookies.get(SESSION_COOKIE, ""))
     if user is None:
-        raise InitDataError("not authenticated")
+        raise InitDataError("Tizimga kirilmagan (Avtorizatsiya talab etiladi)")
     return f"pw:{user}"
 
 
@@ -454,11 +454,11 @@ async def api_reports_list(request: Request):
 @app.post("/api/reports")
 async def api_reports_create(request: Request):
     if not _rate_ok(f"report:{_client_ip(request)}", limit=30, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid json")
+        raise HTTPException(status_code=400, detail="Noto'g'ri JSON formati")
     _auth_or_403(request, str(body.get("init_data", "")))
     try:
         name = rules.clean_report_name(body.get("name", ""))
@@ -484,7 +484,7 @@ async def api_reports_delete(request: Request, report_id: int):
 @app.post("/api/reports/{report_id}/zero-top-coefficients")
 async def api_reports_zero_top_coefficients(request: Request, report_id: int):
     if not _rate_ok(f"zero-coef:{_client_ip(request)}", limit=10, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     try:
         body = await request.json()
     except Exception:
@@ -533,11 +533,11 @@ async def api_system_status(request: Request):
 @app.post("/api/types")
 async def api_types_add(request: Request):
     if not _rate_ok(f"types:{_client_ip(request)}", limit=30, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid json")
+        raise HTTPException(status_code=400, detail="Noto'g'ri JSON formati")
     _auth_or_403(request, str(body.get("init_data", "")), state_changing=True)
     try:
         name = rules.clean_type_name(body.get("name", ""))
@@ -553,12 +553,12 @@ async def api_types_add(request: Request):
 @app.delete("/api/types/{name}")
 async def api_types_delete(request: Request, name: str):
     if not _rate_ok(f"types:{_client_ip(request)}", limit=30, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     _auth_or_403(request, state_changing=True)
     try:
         db.delete_custom_type(name)
     except ValueError:
-        raise HTTPException(status_code=400, detail="default tovar turini o'chirib bo'lmaydi")
+        raise HTTPException(status_code=400, detail="Standart tovar turini o'chirib bo'lmaydi")
     return {"ok": True, **db.list_types()}
 
 
@@ -578,7 +578,7 @@ async def submit_report(
     photos: list[UploadFile] = [],  # noqa: B006 (FastAPI handles default)
 ):
     if not _rate_ok(f"report:{_client_ip(request)}", limit=30, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
 
     identity = _auth_or_403(request, init_data)
     rid = _require_report(report_id)
@@ -627,7 +627,7 @@ async def edit_report_entry(
     """Fix a saved reys entry's numbers. Photos are immutable after the initial
     save; the inventory delta is compensated atomically."""
     if not _rate_ok(f"report:{_client_ip(request)}", limit=30, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
 
     identity = _auth_or_403(request, init_data)
     rid = _require_report(report_id)
@@ -677,7 +677,7 @@ async def submit_adjust(
     photos: list[UploadFile] = [],  # noqa: B006
 ):
     if not _rate_ok(f"adjust:{_client_ip(request)}", limit=60, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
 
     identity = _auth_or_403(request, init_data)
     rid = _require_report(report_id)
@@ -717,7 +717,7 @@ async def edit_adjust_entry(
     """Fix a saved transfer's numbers (photos immutable): the old transfer is
     reversed and the new one applied atomically."""
     if not _rate_ok(f"adjust:{_client_ip(request)}", limit=60, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
 
     identity = _auth_or_403(request, init_data)
     rid = _require_report(report_id)
@@ -755,7 +755,7 @@ async def submit_obshiy(
     photos: list[UploadFile] = [],  # noqa: B006
 ):
     if not _rate_ok(f"obshiy:{_client_ip(request)}", limit=80, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     identity = _auth_or_403(request, init_data)
     rid = _require_report(report_id)
     try:
@@ -802,7 +802,7 @@ async def edit_obshiy_entry(
     weight: str = Form(...),
 ):
     if not _rate_ok(f"obshiy:{_client_ip(request)}", limit=80, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     identity = _auth_or_403(request, init_data)
     rid = _require_report(report_id)
     try:
@@ -836,7 +836,7 @@ async def edit_obshiy_entry(
 async def delete_entry(request: Request, entry_id: int, report_id: int | None = None):
     """Delete a reys/adjust entry and undo its inventory effect."""
     if not _rate_ok(f"adjust:{_client_ip(request)}", limit=60, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     identity = _auth_or_403(request, state_changing=True)  # cookie path requires same-origin
     rid = _require_report(report_id)
     try:
@@ -950,22 +950,22 @@ async def api_export_summary(request: Request, report_id: int | None = None):
 @app.post("/api/send-bulk")
 async def api_send_bulk(request: Request):
     if not _rate_ok(f"send:{_client_ip(request)}", limit=20, window=60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=429, detail="Juda ko'p so'rov yuborildi. Iltimos, biroz kuting.")
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="invalid json")
+        raise HTTPException(status_code=400, detail="Noto'g'ri JSON formati")
     identity = _auth_or_403(request, str(body.get("init_data", "")), state_changing=True)
     rid = _require_report(body.get("report_id"))
     kind = str(body.get("kind", "reys"))
     action = _entry_action(kind)
     mode = str(body.get("mode", "unsent"))
     if mode not in ("unsent", "sent"):
-        raise HTTPException(status_code=400, detail="send mode noto'g'ri")
+        raise HTTPException(status_code=400, detail="Yuborish rejimi noto'g'ri")
     entry_ids = body.get("entry_ids")
     if entry_ids is not None:
         if not isinstance(entry_ids, list):
-            raise HTTPException(status_code=400, detail="entry_ids noto'g'ri")
+            raise HTTPException(status_code=400, detail="Yozuvlar ID ro'yxati noto'g'ri")
         count = db.enqueue_selected_send(rid, action, entry_ids)
     else:
         count = db.enqueue_bulk_send(rid, action, mode=mode)
@@ -1010,4 +1010,4 @@ async def api_activity(request: Request, report_id: int | None = None,
 @app.exception_handler(Exception)
 async def unhandled(_: Request, exc: Exception):
     log.exception("unhandled error: %s", exc)
-    return JSONResponse(status_code=500, content={"ok": False, "detail": "server error"})
+    return JSONResponse(status_code=500, content={"ok": False, "detail": "Serverda kutilmagan xatolik yuz berdi"})

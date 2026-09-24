@@ -419,7 +419,7 @@ def _prune(c: sqlite3.Connection) -> None:
 def create_report(name: str) -> dict:
     name = name.strip()
     if not name:
-        raise ValueError("empty name")
+        raise ValueError("Hisobot nomi bo'sh bo'lishi mumkin emas")
     now = int(time.time())
     with _db() as c:
         exists = c.execute("SELECT 1 FROM reports WHERE name = ? COLLATE NOCASE", (name,)).fetchone()
@@ -479,7 +479,7 @@ def list_types() -> dict:
 def add_custom_type(name: str) -> str:
     name = _clean_type(name)
     if not name:
-        raise ValueError("empty type")
+        raise ValueError("Tovar turi bo'sh bo'lishi mumkin emas")
     now = int(time.time())
     with _db() as c:
         if _is_default_type(name):
@@ -501,9 +501,9 @@ def add_custom_type(name: str) -> str:
 def delete_custom_type(name: str) -> None:
     name = _clean_type(name)
     if not name:
-        raise ValueError("empty type")
+        raise ValueError("Tovar turi bo'sh bo'lishi mumkin emas")
     if _is_default_type(name):
-        raise ValueError("default type")
+        raise ValueError("Standart tovar turini o'chirib bo'lmaydi")
     with _db() as c:
         c.execute(
             "UPDATE custom_types SET deleted_at = ? WHERE name = ?",
@@ -541,7 +541,7 @@ def add_reys(report_id: int, actor: str, tovar_turi: str, weight: float,
         and math.isfinite(net)
         and math.isfinite(box_weight)
     ):
-        raise ValueError("non-finite value")
+        raise ValueError("Cheksiz yoki noto'g'ri qiymat kiritildi")
     now = int(time.time())
     with _db() as c:
         _ensure_type(c, report_id, tovar_turi)
@@ -566,7 +566,7 @@ def add_reys(report_id: int, actor: str, tovar_turi: str, weight: float,
 def adjust(report_id: int, actor: str, from_type: str, to_type: str, weight: float,
            photos: int = 0) -> dict:
     if not (math.isfinite(weight) and weight > 0):
-        raise ValueError("non-finite value")
+        raise ValueError("Cheksiz yoki noto'g'ri qiymat kiritildi")
     now = int(time.time())
     with _db() as c:
         _ensure_type(c, report_id, from_type)
@@ -598,9 +598,9 @@ def add_obshiy(report_id: int, actor: str, action: str, code: str,
                photos: int = 0, box_weight: float = 0,
                coefficient_mode: str = "none") -> dict:
     if action not in OBSHIY_ACTIONS:
-        raise ValueError("bad obshiy action")
+        raise ValueError("Noto'g'ri bo'lim amali")
     if not (math.isfinite(weight) and math.isfinite(coefficient) and math.isfinite(box_weight) and weight > 0):
-        raise ValueError("non-finite value")
+        raise ValueError("Cheksiz yoki noto'g'ri qiymat kiritildi")
     if box_weight <= 0 and coefficient > 0:
         box_weight = coefficient
     coefficient = 0
@@ -667,7 +667,7 @@ def edit_reys(report_id: int, entry_id: int, tovar_turi: str, weight: float,
         and math.isfinite(net)
         and math.isfinite(box_weight)
     ):
-        raise ValueError("non-finite value")
+        raise ValueError("Cheksiz yoki noto'g'ri qiymat kiritildi")
     now = int(time.time())
     with _db() as c:
         old = _get_entry(c, report_id, entry_id, "reys")
@@ -698,7 +698,7 @@ def edit_reys(report_id: int, entry_id: int, tovar_turi: str, weight: float,
 def edit_adjust(report_id: int, entry_id: int, from_type: str, to_type: str,
                 weight: float) -> dict:
     if not (math.isfinite(weight) and weight > 0):
-        raise ValueError("non-finite value")
+        raise ValueError("Cheksiz yoki noto'g'ri qiymat kiritildi")
     now = int(time.time())
     with _db() as c:
         old = _get_entry(c, report_id, entry_id, "adjust")
@@ -726,9 +726,9 @@ def edit_obshiy(report_id: int, entry_id: int, action: str, code: str,
                 weight: float, coefficient: float = 0, net: float | None = None,
                 box_weight: float = 0, coefficient_mode: str = "none") -> dict:
     if action not in OBSHIY_ACTIONS:
-        raise ValueError("bad obshiy action")
+        raise ValueError("Noto'g'ri bo'lim amali")
     if not (math.isfinite(weight) and math.isfinite(coefficient) and math.isfinite(box_weight) and weight > 0):
-        raise ValueError("non-finite value")
+        raise ValueError("Cheksiz yoki noto'g'ri qiymat kiritildi")
     if box_weight <= 0 and coefficient > 0:
         box_weight = coefficient
     coefficient = 0

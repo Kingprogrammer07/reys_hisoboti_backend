@@ -33,7 +33,7 @@ def _r2_endpoint() -> str:
 
 def _r2_client():
     if not r2_enabled():
-        raise StorageUnavailable("R2 storage is not enabled")
+        raise StorageUnavailable("R2 bulutli xotirasi yoqilmagan")
     missing = [
         name for name, value in (
             ("CLOUDFLARE_R2_ACCOUNT_ID", config.CLOUDFLARE_R2_ACCOUNT_ID),
@@ -44,12 +44,12 @@ def _r2_client():
         if not value
     ]
     if missing:
-        raise StorageUnavailable(f"missing R2 config: {', '.join(missing)}")
+        raise StorageUnavailable(f"R2 sozlamalari to'liq emas: {', '.join(missing)}")
     try:
         import boto3
         from botocore.config import Config
     except ModuleNotFoundError as exc:
-        raise StorageUnavailable("boto3 is not installed") from exc
+        raise StorageUnavailable("boto3 kutubxonasi o'rnatilmagan") from exc
     return boto3.client(
         "s3",
         endpoint_url=_r2_endpoint(),

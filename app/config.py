@@ -88,7 +88,10 @@ def _parse_chat_id(raw: str):
     if not raw:
         return None
     try:
-        return int(raw)
+        val = int(raw)
+        if val > 10_000_000_000 and str(val).startswith("100"):
+            return -val
+        return val
     except ValueError:
         return raw
 
@@ -100,6 +103,12 @@ TOP_TYPE_CHANNEL_ID = _parse_chat_id(os.getenv("BOT_TOP_TYPE_CHANNEL_ID", ""))
 TOPDAN_CHIQGAN_CHANNEL_ID = _parse_chat_id(os.getenv("BOT_TOPDAN_CHIQGAN_CHANNEL_ID", ""))
 BIZDA_QOLADIGAN_CHANNEL_ID = _parse_chat_id(os.getenv("BOT_BIZDA_QOLADIGAN_CHANNEL_ID", ""))
 BIZDAN_CHIQGAN_CHANNEL_ID = _parse_chat_id(os.getenv("BOT_BIZDAN_CHIQGAN_CHANNEL_ID", ""))
+
+# Backup channel (standart: -1002982052676)
+BACKUP_CHANNEL_ID = _parse_chat_id(os.getenv("BOT_BACKUP_CHANNEL_ID", "-1002982052676"))
+BACKUP_INTERVAL_HOURS: int = int(os.getenv("BACKUP_INTERVAL_HOURS", "24"))
+BACKUP_RETENTION_DAYS: int = int(os.getenv("BACKUP_RETENTION_DAYS", "30"))
+BACKUP_DIR: Path = DATA_DIR / "backups" 
 
 OBSHIY_CHANNELS = {
     "top": TOP_TYPE_CHANNEL_ID,

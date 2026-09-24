@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .backup_router import router as backup_router
 from .bin_router import router as bin_router
 from .cargo_router import router as cargo_router
 from .entry_router import router as entry_router
@@ -12,4 +13,5 @@ __all__ = [
     "entry_router",
     "bin_router",
     "inventory_router",
+    "backup_router",
 ]

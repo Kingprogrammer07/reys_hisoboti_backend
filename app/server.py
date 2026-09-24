@@ -34,7 +34,8 @@ from webauthn.helpers.structs import (
 )
 
 from . import config, database, db, db_guard, excel_export, outbox, passkeys, rules
-from .routers import bin_router, cargo_router, entry_router, inventory_router, reys_router
+from .routers import backup_router, bin_router, cargo_router, entry_router, inventory_router, reys_router
+from .services import backup_scheduler
 from .security import (
     InitDataError,
     authenticate_admin,
@@ -59,7 +60,9 @@ async def lifespan(app: FastAPI):
     db.init()
     await database.init_db()
     outbox.ensure_started()
+    backup_scheduler.start_backup_scheduler()
     yield
+    backup_scheduler.stop_backup_scheduler()
     await database.close_db()
 
 
@@ -89,6 +92,7 @@ app.include_router(reys_router)
 app.include_router(entry_router)
 app.include_router(bin_router)
 app.include_router(inventory_router)
+app.include_router(backup_router)
 
 
 # ---------------------------------------------------------------------------

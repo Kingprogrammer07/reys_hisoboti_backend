@@ -123,10 +123,10 @@ class EntryService:
             raise ValueError("Karobka og'irligi 10 kg dan oshmasligi kerak (ADR-001)")
         if gross > 3.0 and tare > 0.5 * gross:
             raise ValueError("Karobka og'irligi umumiy og'irlikning 50% idan oshmasligi kerak (ADR-002)")
-        if tare >= gross:
+        if (data.coefficient_mode or "").strip().lower() != "box" and tare >= gross:
             raise ValueError("Karobka og'irligi umumiy og'irlikdan kichik bo'lishi kerak")
 
-        net = round(gross - tare, 3)
+        net = gross if (data.coefficient_mode or "").strip().lower() == "box" else round(gross - tare, 3)
         if net <= 0:
             raise ValueError("Sof vazn 0 dan katta bo'lishi kerak")
 

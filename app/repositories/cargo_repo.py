@@ -74,10 +74,11 @@ class CargoRepository:
         cargo = await self.get_by_id(cargo_id, include_deleted=True)
         if not cargo or cargo.deleted_at is None:
             return False
+        cascade_deleted_at = cargo.deleted_at
         cargo.deleted_at = None
         # Un-delete associated reyslar that were deleted along with the cargo
         for reys in cargo.reyslar:
-            if reys.deleted_at == cargo.deleted_at:
+            if reys.deleted_at == cascade_deleted_at:
                 reys.deleted_at = None
         await self.session.flush()
         return True

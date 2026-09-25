@@ -207,13 +207,17 @@ def put_photo(
     reys_code: str = "",
     box_code: str = "",
     quality: int = 92,
+    already_optimized: bool = False,
 ) -> StoredPhoto | None:
     """Optimize, convert to WebP, and store photo in Cloudflare R2."""
     if not r2_enabled():
         return None
 
-    # Convert to WebP (90-95% quality)
-    webp_data, webp_mime = optimize_and_convert_to_webp(data, quality=quality)
+    if already_optimized:
+        webp_data, webp_mime = data, mime
+    else:
+        # Convert to WebP (90-95% quality)
+        webp_data, webp_mime = optimize_and_convert_to_webp(data, quality=quality)
     key = photo_key(
         entry_id=entry_id,
         idx=idx,

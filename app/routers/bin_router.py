@@ -4,11 +4,12 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import require_session
 from ..database import get_db_session
 from ..repositories.bin_repo import RecycleBinRepository
 from ..schemas.bin import RecycleBinItem, RecycleBinListResponse, RestoreRequest
 
-router = APIRouter(prefix="/api/bin", tags=["recycle_bin"])
+router = APIRouter(prefix="/api/bin", tags=["recycle_bin"], dependencies=[Depends(require_session)])
 
 
 def get_repo(session: AsyncSession = Depends(get_db_session)) -> RecycleBinRepository:

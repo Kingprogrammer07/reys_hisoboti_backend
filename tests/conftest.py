@@ -19,6 +19,7 @@ os.environ["DATABASE_URL"] = ""
 
 from app.database import Base, get_db_session
 from app.server import app
+from app import config
 
 TEST_ENGINE = create_async_engine(
     "sqlite+aiosqlite:///:memory:",
@@ -63,3 +64,11 @@ async def client(db_session: AsyncSession) -> AsyncGenerator[httpx.AsyncClient, 
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def auth_headers(client: httpx.AsyncClient) -> dict[str, str]:
+    resp = await client.post("/api/auth/login", json={"pin": config.ADMIN_PASSWORD})
+    assert resp.status_code == 200
+    token = resp.json()["token"]
+    return {"Authorization": f"Bearer {token}"}

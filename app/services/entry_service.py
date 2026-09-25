@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import time
 from pathlib import Path
@@ -15,7 +16,9 @@ from ..repositories.cargo_repo import CargoRepository
 from ..repositories.entry_repo import EntryRepository
 from ..repositories.inventory_repo import InventoryRepository
 from ..repositories.reys_repo import ReysRepository
-from ..schemas.entry import EntryCreate, EntryResponse, PhotoMetadata
+from ..schemas.entry import EntryAdjustmentCreate, EntryAdjustmentResponse, EntryCreate, EntryResponse, PhotoMetadata
+
+log = logging.getLogger("reys.entry_service")
 
 
 class EntryService:
@@ -150,14 +153,19 @@ class EntryService:
 
         for idx, (raw_bytes, raw_mime) in enumerate(photos_list):
             # WebP ga 92% sifat bilan o'girish (iOS HEIC/PNG/JPG barchasini qo'llaydi)
-            photo_bytes, mime = storage.optimize_and_convert_to_webp(raw_bytes, quality=92)
+            photo_bytes, mime = await asyncio.to_thread(
+                storage.optimize_and_convert_to_webp,
+                raw_bytes,
+                quality=92,
+            )
 
             stored_backend = "disk"
             stored_key: Optional[str] = None
 
             if storage.r2_enabled():
                 try:
-                    res = storage.put_photo(
+                    res = await asyncio.to_thread(
+                        storage.put_photo,
                         entry_id=entry.id,
                         idx=idx,
                         data=photo_bytes,
@@ -166,6 +174,7 @@ class EntryService:
                         reys_code=reys_code,
                         box_code=entry.box_code,
                         quality=92,
+                        already_optimized=True,
                     )
                     if res:
                         stored_backend = "r2"
@@ -178,7 +187,7 @@ class EntryService:
                 photo_dir = config.DATA_DIR / "photos" / str(entry.id)
                 photo_dir.mkdir(parents=True, exist_ok=True)
                 photo_path = photo_dir / f"{idx}.webp"
-                photo_path.write_bytes(photo_bytes)
+                await asyncio.to_thread(photo_path.write_bytes, photo_bytes)
                 stored_key = f"photos/{entry.id}/{idx}.webp"
 
             await self.entry_repo.add_photo(
@@ -266,3 +275,62 @@ class EntryService:
             # Recompute totals
             await self.reys_repo.recompute_totals(entry.reys_id)
         return ok
+
+    async def adjust_inventory(self, data: EntryAdjustmentCreate) -> EntryAdjustmentResponse:
+        reys = await self.reys_repo.get_by_id(data.reys_id)
+        if not reys:
+            raise ValueError(f"Reys {data.reys_id} topilmadi")
+
+        from_type = data.from_type.strip().lower()
+        to_type = data.to_type.strip().lower()
+        if from_type == to_type:
+            raise ValueError("Bir xil tovar turiga o'tkazib bo'lmaydi")
+
+        weight = round(float(data.weight), 3)
+        if weight <= 0:
+            raise ValueError("O'tkazilayotgan og'irlik musbat bo'lishi kerak")
+
+        source = await self.inv_repo.get_by_reys_and_type(data.reys_id, from_type)
+        source_weight = round(float(source.weight if source else 0.0), 3)
+        if source_weight + 1e-9 < weight:
+            raise ValueError(f"{from_type}da yetarli emas: {source_weight:g} kg mavjud")
+
+        await self.inv_repo.upsert_inventory(
+            reys_id=data.reys_id,
+            tovar_turi=from_type,
+            weight_delta=-weight,
+            count_delta=0,
+        )
+        await self.inv_repo.upsert_inventory(
+            reys_id=data.reys_id,
+            tovar_turi=to_type,
+            weight_delta=weight,
+            count_delta=0,
+        )
+
+        activity = ActivityLog(
+            reys_id=data.reys_id,
+            actor=data.created_by,
+            action="adjust",
+            from_type=from_type,
+            to_type=to_type,
+            weight=weight,
+            net=0.0,
+            photos_count=0,
+            created_at=int(time.time()),
+        )
+        self.session.add(activity)
+        await self.session.flush()
+
+        from_inv = await self.inv_repo.get_by_reys_and_type(data.reys_id, from_type)
+        to_inv = await self.inv_repo.get_by_reys_and_type(data.reys_id, to_type)
+        return EntryAdjustmentResponse(
+            reys_id=data.reys_id,
+            from_type=from_type,
+            to_type=to_type,
+            weight=weight,
+            balances={
+                from_type: round(float(from_inv.weight if from_inv else 0.0), 3),
+                to_type: round(float(to_inv.weight if to_inv else 0.0), 3),
+            },
+        )

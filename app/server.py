@@ -34,6 +34,7 @@ from webauthn.helpers.structs import (
 )
 
 from . import config, database, db, db_guard, excel_export, outbox, passkeys, rules, storage
+from .auth import SESSION_COOKIE, require_session, session_user_from_request
 from .routers import backup_router, bin_router, cargo_router, dashboard_router, entry_router, inventory_router, reys_router
 from .services import backup_scheduler, db_sync_worker, r2_sync_worker
 from .security import (
@@ -51,8 +52,6 @@ MAX_PHOTO_BYTES = rules.MAX_PHOTO_BYTES       # 12 MB per photo
 MAX_TOTAL_BYTES = rules.MAX_TOTAL_BYTES       # 60 MB per request
 MAX_BODY_BYTES = rules.MAX_BODY_BYTES         # + multipart overhead
 _CHUNK = 64 * 1024
-
-SESSION_COOKIE = "reys_session"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -299,11 +298,7 @@ async def login(request: Request):
 
 @app.get("/api/auth/me")
 async def auth_me(request: Request) -> dict:
-    auth_header = request.headers.get("authorization", "")
-    token = request.cookies.get(SESSION_COOKIE, "")
-    if not token and auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-    user = verify_session(token)
+    user = session_user_from_request(request)
     return {"authenticated": user is not None, "user": user}
 
 
@@ -315,14 +310,7 @@ async def logout():
 
 
 def _require_session(request: Request) -> str:
-    auth_header = request.headers.get("authorization", "")
-    token = request.cookies.get(SESSION_COOKIE, "")
-    if not token and auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-    user = verify_session(token)
-    if user is None:
-        raise HTTPException(status_code=401, detail="Tizimga kirilmagan (Avtorizatsiya talab etiladi)")
-    return user
+    return require_session(request)
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import require_session
 from ..database import get_db_session
 from ..repositories.inventory_repo import InventoryRepository
 from ..schemas.inventory import (
@@ -13,7 +14,7 @@ from ..schemas.inventory import (
     InventoryResponse,
 )
 
-router = APIRouter(tags=["inventory"])
+router = APIRouter(tags=["inventory"], dependencies=[Depends(require_session)])
 
 
 def get_repo(session: AsyncSession = Depends(get_db_session)) -> InventoryRepository:

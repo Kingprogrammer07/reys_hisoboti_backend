@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from sqlalchemy import BigInteger, Integer, String, Text
+from sqlalchemy import BigInteger, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from ..database import Base
@@ -10,6 +10,9 @@ from ..database import Base
 class SendQueue(Base):
     """Durable Telegram send queue model."""
     __tablename__ = "send_queue"
+    __table_args__ = (
+        Index("ix_send_queue_pending", "status", "next_at", "created_at"),
+    )
 
     entry_id: Mapped[int] = mapped_column(primary_key=True)
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False, index=True)

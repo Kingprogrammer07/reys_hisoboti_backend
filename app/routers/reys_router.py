@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import require_session
 from ..database import get_db_session
 from ..schemas.reys import (
     ReysAdjust,
@@ -14,7 +15,7 @@ from ..schemas.reys import (
 )
 from ..services.reys_service import ReysService
 
-router = APIRouter(prefix="/api/reys", tags=["reys"])
+router = APIRouter(prefix="/api/reys", tags=["reys"], dependencies=[Depends(require_session)])
 
 
 def get_service(session: AsyncSession = Depends(get_db_session)) -> ReysService:

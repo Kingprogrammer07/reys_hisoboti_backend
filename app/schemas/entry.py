@@ -35,6 +35,23 @@ class EntryCreate(BaseModel):
         return v
 
 
+class EntryAdjustmentCreate(BaseModel):
+    reys_id: int = Field(..., description="Tegishli Reys ID")
+    from_type: str = Field(..., min_length=1, max_length=60)
+    to_type: str = Field(..., min_length=1, max_length=60)
+    weight: float = Field(..., gt=0.0)
+    created_by: str = Field("operator", max_length=100)
+
+
+class EntryAdjustmentResponse(BaseModel):
+    ok: bool = True
+    reys_id: int
+    from_type: str
+    to_type: str
+    weight: float
+    balances: dict[str, float]
+
+
 class EntryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

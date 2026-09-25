@@ -14,15 +14,16 @@ from pathlib import Path
 import time
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
 from .. import config
+from ..auth import require_session
 from ..services import backup_scheduler, backup_service
 
 log = logging.getLogger("reys.backup_router")
 
-router = APIRouter(prefix="/api/backup", tags=["backup"])
+router = APIRouter(prefix="/api/backup", tags=["backup"], dependencies=[Depends(require_session)])
 
 
 @router.get("/stats")

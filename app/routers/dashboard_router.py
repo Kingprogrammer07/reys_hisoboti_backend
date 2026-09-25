@@ -4,16 +4,17 @@ import datetime
 import time
 from typing import Any, Dict, List
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
+from ..auth import require_session
 from ..database import get_db_session
 from ..models.cargo import Cargo
-from ..models.entry import Entry
+from ..models.entry import Entry, EntryPhoto
+from ..models.inventory import Inventory
 from ..models.reys import Reys
 
-router = APIRouter(tags=["dashboard"])
+router = APIRouter(tags=["dashboard"], dependencies=[Depends(require_session)])
 
 
 _stats_cache: tuple[float, Dict[str, Any]] | None = None
@@ -37,9 +38,11 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -
     today_start_dt = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
     today_start_ts = int(today_start_dt.timestamp())
 
-    # Combined single query for 5 high-level metrics
+    # Combined single query for high-level metrics.
     metrics_stmt = select(
         select(func.coalesce(func.sum(Entry.net_weight), 0.0)).where(Entry.deleted_at.is_(None)).scalar_subquery().label("total_net_weight"),
+        select(func.coalesce(func.sum(Entry.gross_weight), 0.0)).where(Entry.deleted_at.is_(None)).scalar_subquery().label("total_gross_weight"),
+        select(func.coalesce(func.sum(Entry.tare_weight), 0.0)).where(Entry.deleted_at.is_(None)).scalar_subquery().label("total_karobka_weight"),
         select(func.count(Entry.id)).where(Entry.deleted_at.is_(None)).scalar_subquery().label("total_entries_count"),
         select(func.count(Cargo.id)).where(Cargo.deleted_at.is_(None)).scalar_subquery().label("cargos_count"),
         select(func.count(Reys.id)).where(Reys.deleted_at.is_(None)).scalar_subquery().label("reys_count"),
@@ -47,41 +50,32 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -
             Entry.deleted_at.is_(None),
             Entry.created_at >= today_start_ts,
         ).scalar_subquery().label("today_added_kg"),
+        select(func.count(Entry.id)).where(
+            Entry.deleted_at.is_(None),
+            Entry.created_at >= today_start_ts,
+        ).scalar_subquery().label("today_entries_count"),
     )
     metrics_row = (await session.execute(metrics_stmt)).one()
 
     total_net_weight = round(float(metrics_row.total_net_weight or 0.0), 2)
+    total_gross_weight = round(float(metrics_row.total_gross_weight or 0.0), 2)
+    total_karobka_weight = round(float(metrics_row.total_karobka_weight or 0.0), 2)
     total_entries_count = int(metrics_row.total_entries_count or 0)
     cargos_count = int(metrics_row.cargos_count or 0)
     reys_count = int(metrics_row.reys_count or 0)
     today_added_kg = round(float(metrics_row.today_added_kg or 0.0), 2)
+    today_entries_count = int(metrics_row.today_entries_count or 0)
 
-    # Total gross & tare weights
-    weights_stmt = select(
-        func.coalesce(func.sum(Entry.gross_weight), 0.0).label("gross"),
-        func.coalesce(func.sum(Entry.tare_weight), 0.0).label("tare"),
-    ).where(Entry.deleted_at.is_(None))
-    weights_row = (await session.execute(weights_stmt)).one()
-    total_gross_weight = round(float(weights_row.gross or 0.0), 2)
-    total_karobka_weight = round(float(weights_row.tare or 0.0), 2)
-
-    # Today entries count
-    today_entries_stmt = select(func.count(Entry.id)).where(
-        Entry.deleted_at.is_(None),
-        Entry.created_at >= today_start_ts,
-    )
-    today_entries_count = int((await session.execute(today_entries_stmt)).scalar() or 0)
-
-    # 5. Inventory summary (group by tovar_turi)
+    # 5. Inventory summary (group by tovar_turi). Use inventory_v2 so transfers
+    # such as "adashgan yuklar" are reflected without changing total reys weight.
     inv_stmt = (
         select(
-            Entry.tovar_turi,
-            func.coalesce(func.sum(Entry.net_weight), 0.0).label("balance_weight"),
-            func.count(Entry.id).label("package_count"),
+            Inventory.tovar_turi,
+            func.coalesce(func.sum(Inventory.weight), 0.0).label("balance_weight"),
+            func.coalesce(func.sum(Inventory.package_count), 0).label("package_count"),
         )
-        .where(Entry.deleted_at.is_(None))
-        .group_by(Entry.tovar_turi)
-        .order_by(func.sum(Entry.net_weight).desc())
+        .group_by(Inventory.tovar_turi)
+        .order_by(func.sum(Inventory.weight).desc())
     )
     inv_res = await session.execute(inv_stmt)
     inventory_items = []
@@ -95,87 +89,118 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -
         })
 
     # 6. Cargos statistics breakdown
+    reys_totals = (
+        select(
+            Reys.id.label("reys_id"),
+            Reys.cargo_id.label("cargo_id"),
+            Reys.date.label("date"),
+            func.coalesce(func.sum(Entry.net_weight), Reys.toza_kg, 0.0).label("toza_kg"),
+            func.coalesce(func.sum(Entry.tare_weight), Reys.karobka_plus_kg, 0.0).label("karobka_kg"),
+            func.count(Entry.id).label("entries_count"),
+        )
+        .outerjoin(Entry, and_(Entry.reys_id == Reys.id, Entry.deleted_at.is_(None)))
+        .where(Reys.deleted_at.is_(None))
+        .group_by(Reys.id)
+        .subquery()
+    )
     cargos_stmt = (
-        select(Cargo)
-        .options(selectinload(Cargo.reyslar).selectinload(Reys.entries))
+        select(
+            Cargo.id,
+            Cargo.code,
+            Cargo.created_at,
+            func.count(reys_totals.c.reys_id).label("reys_count"),
+            func.coalesce(func.sum(reys_totals.c.toza_kg), 0.0).label("total_toza_kg"),
+            func.coalesce(func.sum(reys_totals.c.karobka_kg), 0.0).label("total_karobka_plus_kg"),
+            func.coalesce(func.sum(reys_totals.c.entries_count), 0).label("entries_count"),
+            func.max(reys_totals.c.date).label("latest_date"),
+        )
+        .outerjoin(reys_totals, reys_totals.c.cargo_id == Cargo.id)
         .where(Cargo.deleted_at.is_(None))
+        .group_by(Cargo.id)
         .order_by(Cargo.id.desc())
     )
     cargos_res = await session.execute(cargos_stmt)
-    cargos_list = cargos_res.scalars().all()
     cargos_stats = []
-    for c in cargos_list:
-        active_reyslar = [r for r in c.reyslar if r.deleted_at is None]
-        c_toza = 0.0
-        c_karobka = 0.0
-        for r in active_reyslar:
-            r_entries = [e for e in r.entries if e.deleted_at is None]
-            r_toza = sum(e.net_weight for e in r_entries) if r_entries else r.toza_kg
-            r_karobka = sum(e.tare_weight for e in r_entries) if r_entries else r.karobka_plus_kg
-            c_toza += r_toza
-            c_karobka += r_karobka
-
-        c_toza = round(c_toza, 2)
-        c_karobka = round(c_karobka, 2)
+    for c in cargos_res.all():
+        c_toza = round(float(c.total_toza_kg or 0.0), 2)
+        c_karobka = round(float(c.total_karobka_plus_kg or 0.0), 2)
         c_gross = round(c_toza + c_karobka, 2)
-        all_entries = [e for r in active_reyslar for e in r.entries if e.deleted_at is None]
-        c_entries_count = len(all_entries)
-        latest_date = max([r.date for r in active_reyslar], default=None)
         share_pct = round((c_toza / total_net_weight * 100) if total_net_weight > 0 else 0, 1)
 
         cargos_stats.append({
             "id": c.id,
             "code": c.code,
             "created_at": c.created_at,
-            "reys_count": len(active_reyslar),
+            "reys_count": int(c.reys_count or 0),
             "total_toza_kg": c_toza,
             "total_karobka_plus_kg": c_karobka,
             "total_gross_kg": c_gross,
-            "entries_count": c_entries_count,
-            "latest_date": latest_date,
+            "entries_count": int(c.entries_count or 0),
+            "latest_date": c.latest_date,
             "share_percentage": share_pct,
         })
 
     # 7. Recent reyslar (top 5)
     recent_reys_stmt = (
-        select(Reys)
-        .options(selectinload(Reys.cargo), selectinload(Reys.entries))
+        select(
+            Reys.id,
+            Reys.code,
+            Reys.cargo_id,
+            Cargo.code.label("cargo_code"),
+            Reys.custom_name,
+            Reys.date,
+            func.coalesce(func.sum(Entry.net_weight), Reys.toza_kg, 0.0).label("toza_kg"),
+            func.coalesce(func.sum(Entry.tare_weight), Reys.karobka_plus_kg, 0.0).label("karobka_plus_kg"),
+            func.count(Entry.id).label("entries_count"),
+        )
+        .outerjoin(Cargo, Cargo.id == Reys.cargo_id)
+        .outerjoin(Entry, and_(Entry.reys_id == Reys.id, Entry.deleted_at.is_(None)))
         .where(Reys.deleted_at.is_(None))
+        .group_by(Reys.id, Cargo.code)
         .order_by(Reys.id.desc())
         .limit(5)
     )
     recent_reys_res = await session.execute(recent_reys_stmt)
-    recent_reys_items = recent_reys_res.scalars().all()
     recent_reyslar = []
-    for r in recent_reys_items:
-        r_entries = [e for e in r.entries if e.deleted_at is None]
-        r_toza = round(sum(e.net_weight for e in r_entries) if r_entries else r.toza_kg, 2)
-        r_karobka = round(sum(e.tare_weight for e in r_entries) if r_entries else r.karobka_plus_kg, 2)
+    for r in recent_reys_res.all():
+        r_toza = round(float(r.toza_kg or 0.0), 2)
+        r_karobka = round(float(r.karobka_plus_kg or 0.0), 2)
         recent_reyslar.append({
             "id": r.id,
             "code": r.code,
             "cargo_id": r.cargo_id,
-            "cargo_code": r.cargo.code if r.cargo else "-",
+            "cargo_code": r.cargo_code or "-",
             "custom_name": r.custom_name,
             "date": r.date,
             "toza_kg": r_toza,
             "karobka_plus_kg": r_karobka,
             "total_gross_kg": round(r_toza + r_karobka, 2),
-            "entries_count": len(r_entries),
+            "entries_count": int(r.entries_count or 0),
         })
 
     # 8. Recent activities (latest 10 entries)
     recent_stmt = (
-        select(Entry)
-        .options(selectinload(Entry.photos))
+        select(
+            Entry.id,
+            Entry.reys_id,
+            Entry.box_code,
+            Entry.tovar_turi,
+            Entry.gross_weight,
+            Entry.tare_weight,
+            Entry.net_weight,
+            Entry.created_by,
+            Entry.created_at,
+            func.count(EntryPhoto.id).label("photos_count"),
+        )
+        .outerjoin(EntryPhoto, EntryPhoto.entry_id == Entry.id)
         .where(Entry.deleted_at.is_(None))
+        .group_by(Entry.id)
         .order_by(Entry.created_at.desc(), Entry.id.desc())
         .limit(10)
     )
     recent_res = await session.execute(recent_stmt)
-    recent_entries = recent_res.scalars().all()
     activities = []
-    for e in recent_entries:
+    for e in recent_res.all():
         dt_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.created_at))
         activities.append({
             "id": e.id,
@@ -186,7 +211,7 @@ async def get_dashboard_stats(session: AsyncSession = Depends(get_db_session)) -
             "coefficient": e.tare_weight,
             "net_weight": e.net_weight,
             "created_by": e.created_by,
-            "photos_count": len(e.photos) if e.photos else 0,
+            "photos_count": int(e.photos_count or 0),
             "created_at": dt_str,
         })
 
@@ -216,16 +241,27 @@ async def get_all_activities(
     session: AsyncSession = Depends(get_db_session),
 ) -> List[Dict[str, Any]]:
     recent_stmt = (
-        select(Entry)
-        .options(selectinload(Entry.photos))
+        select(
+            Entry.id,
+            Entry.reys_id,
+            Entry.box_code,
+            Entry.tovar_turi,
+            Entry.gross_weight,
+            Entry.tare_weight,
+            Entry.net_weight,
+            Entry.created_by,
+            Entry.created_at,
+            func.count(EntryPhoto.id).label("photos_count"),
+        )
+        .outerjoin(EntryPhoto, EntryPhoto.entry_id == Entry.id)
         .where(Entry.deleted_at.is_(None))
+        .group_by(Entry.id)
         .order_by(Entry.created_at.desc(), Entry.id.desc())
         .limit(limit)
     )
     recent_res = await session.execute(recent_stmt)
-    entries = recent_res.scalars().all()
     results = []
-    for e in entries:
+    for e in recent_res.all():
         dt_str = time.strftime("%Y-%m-%d %H:%M", time.localtime(e.created_at))
         results.append({
             "id": e.id,
@@ -236,7 +272,7 @@ async def get_all_activities(
             "coefficient": e.tare_weight,
             "net_weight": e.net_weight,
             "created_by": e.created_by,
-            "photos_count": len(e.photos) if e.photos else 0,
+            "photos_count": int(e.photos_count or 0),
             "created_at": dt_str,
         })
     return results

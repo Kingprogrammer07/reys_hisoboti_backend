@@ -90,8 +90,12 @@ async def test_create_and_cleanup_backup(tmp_path: Path):
 async def test_backup_api_endpoints():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_resp = await client.post("/api/auth/login", json={"pin": config.ADMIN_PASSWORD})
+        assert login_resp.status_code == 200
+        headers = {"Authorization": f"Bearer {login_resp.json()['token']}"}
+
         # 1. Test /api/backup/stats
-        stats_resp = await client.get("/api/backup/stats")
+        stats_resp = await client.get("/api/backup/stats", headers=headers)
         assert stats_resp.status_code == 200
         data = stats_resp.json()
         assert data["status"] == "success"
@@ -100,7 +104,7 @@ async def test_backup_api_endpoints():
         assert data["backup_channel"] == "-1002982052676"
 
         # 2. Test /api/backup/download
-        dl_resp = await client.get("/api/backup/download")
+        dl_resp = await client.get("/api/backup/download", headers=headers)
         assert dl_resp.status_code == 200
         assert "application/octet-stream" in dl_resp.headers["content-type"]
         assert "hisobot_backup_" in dl_resp.headers["content-disposition"]

@@ -43,6 +43,29 @@ async def test_cargo_crud_and_uniqueness(db_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_cargo_restore_restores_reys_deleted_by_cascade(db_session: AsyncSession):
+    cargo_service = CargoService(db_session)
+    reys_service = ReysService(db_session)
+
+    cargo = await cargo_service.create_cargo(CargoCreate(code="CARGO-CASCADE-RESTORE"))
+    reys = await reys_service.create_reys(ReysCreate(
+        cargo_id=cargo.id,
+        code="REYS-CASCADE-RESTORE",
+        date="2026-09-24",
+    ))
+
+    assert await cargo_service.delete_cargo(cargo.id) is True
+    deleted_reys = await reys_service.repo.get_by_id(reys.id, include_deleted=True)
+    assert deleted_reys is not None
+    assert deleted_reys.deleted_at is not None
+
+    assert await cargo_service.restore_cargo(cargo.id) is True
+    restored_reys = await reys_service.repo.get_by_id(reys.id, include_deleted=True)
+    assert restored_reys is not None
+    assert restored_reys.deleted_at is None
+
+
+@pytest.mark.asyncio
 async def test_reys_crud_and_adjustment(db_session: AsyncSession):
     cargo_service = CargoService(db_session)
     reys_service = ReysService(db_session)

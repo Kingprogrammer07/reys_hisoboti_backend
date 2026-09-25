@@ -6,11 +6,12 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import config, storage
+from ..auth import require_session
 from ..database import get_db_session
-from ..schemas.entry import EntryCreate, EntryListResponse, EntryResponse
+from ..schemas.entry import EntryAdjustmentCreate, EntryAdjustmentResponse, EntryCreate, EntryListResponse, EntryResponse
 from ..services.entry_service import EntryService
 
-router = APIRouter(tags=["entries"])
+router = APIRouter(tags=["entries"], dependencies=[Depends(require_session)])
 
 
 def get_service(session: AsyncSession = Depends(get_db_session)) -> EntryService:
@@ -79,6 +80,18 @@ async def create_entry_json(
     """Direct JSON entry creation without photo binaries."""
     try:
         return await service.record_entry(data, photos=[])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/api/entries/adjust", response_model=EntryAdjustmentResponse)
+async def adjust_entry_inventory(
+    data: EntryAdjustmentCreate,
+    service: EntryService = Depends(get_service),
+):
+    """Move weight from one tovar turi to another without changing reys totals."""
+    try:
+        return await service.adjust_inventory(data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

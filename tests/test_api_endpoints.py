@@ -3,16 +3,16 @@ import httpx
 
 
 @pytest.mark.asyncio
-async def test_cargo_and_reys_api_flow(client: httpx.AsyncClient):
+async def test_cargo_and_reys_api_flow(client: httpx.AsyncClient, auth_headers: dict[str, str]):
     # 1. Create Cargo via API
-    resp = await client.post("/api/cargos", json={"code": "API-CARGO-01"})
+    resp = await client.post("/api/cargos", json={"code": "API-CARGO-01"}, headers=auth_headers)
     assert resp.status_code == 201
     cargo_data = resp.json()
     assert cargo_data["code"] == "API-CARGO-01"
     cargo_id = cargo_data["id"]
 
     # 2. List Cargos
-    resp = await client.get("/api/cargos")
+    resp = await client.get("/api/cargos", headers=auth_headers)
     assert resp.status_code == 200
     list_data = resp.json()
     assert list_data["total"] >= 1
@@ -23,7 +23,7 @@ async def test_cargo_and_reys_api_flow(client: httpx.AsyncClient):
         "code": "API-REYS-01",
         "date": "2026-09-24",
         "custom_name": "API Test Reys",
-    })
+    }, headers=auth_headers)
     assert resp.status_code == 201
     reys_data = resp.json()
     assert reys_data["code"] == "API-REYS-01"
@@ -38,45 +38,56 @@ async def test_cargo_and_reys_api_flow(client: httpx.AsyncClient):
         "tare_weight": 2.0,
         "coefficient_mode": "none",
         "created_by": "operator",
-    })
+    }, headers=auth_headers)
     assert resp.status_code == 201
     entry_data = resp.json()
     assert entry_data["net_weight"] == 18.0
     assert entry_data["boxCode"] == "BOX-API-01"
 
     # 5. List Entries for Reys
-    resp = await client.get(f"/api/reys/{reys_id}/entries")
+    resp = await client.get(f"/api/reys/{reys_id}/entries", headers=auth_headers)
     assert resp.status_code == 200
     entries_list = resp.json()
     assert entries_list["total"] == 1
     assert entries_list["items"][0]["net_weight"] == 18.0
 
+    # 6. Dashboard stats should reflect the same records without relationship-heavy loading
+    resp = await client.get("/api/dashboard/stats", headers=auth_headers)
+    assert resp.status_code == 200
+    stats = resp.json()
+    assert stats["status"] == "success"
+    assert stats["total_net_weight"] >= 18.0
+    assert any(c["id"] == cargo_id and c["entries_count"] >= 1 for c in stats["cargos_stats"])
+
 
 @pytest.mark.asyncio
-async def test_cors_headers(client: httpx.AsyncClient):
+async def test_cors_headers(client: httpx.AsyncClient, auth_headers: dict[str, str]):
     # Test request with Origin from React dev server
-    resp = await client.get("/api/cargos", headers={"Origin": "http://localhost:5173"})
+    resp = await client.get(
+        "/api/cargos",
+        headers={"Origin": "http://localhost:5173", **auth_headers},
+    )
     assert resp.status_code == 200
     assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
     assert resp.headers.get("access-control-allow-credentials") == "true"
 
 
 @pytest.mark.asyncio
-async def test_uzbek_error_messages_on_api(client: httpx.AsyncClient):
+async def test_uzbek_error_messages_on_api(client: httpx.AsyncClient, auth_headers: dict[str, str]):
     # 1. 404 Cargo Not Found in Uzbek
-    resp = await client.get("/api/cargos/999999")
+    resp = await client.get("/api/cargos/999999", headers=auth_headers)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Kargo topilmadi"
 
     # 2. 404 Reys Not Found in Uzbek
-    resp = await client.get("/api/reys/999999")
+    resp = await client.get("/api/reys/999999", headers=auth_headers)
     assert resp.status_code == 404
     assert resp.json()["detail"] == "Reys topilmadi"
 
     # 3. 400 Duplicate Cargo error in Uzbek
-    resp1 = await client.post("/api/cargos", json={"code": "DUPLICATE-UZBEK"})
+    resp1 = await client.post("/api/cargos", json={"code": "DUPLICATE-UZBEK"}, headers=auth_headers)
     assert resp1.status_code == 201
-    resp2 = await client.post("/api/cargos", json={"code": "DUPLICATE-UZBEK"})
+    resp2 = await client.post("/api/cargos", json={"code": "DUPLICATE-UZBEK"}, headers=auth_headers)
     assert resp2.status_code == 400
     assert "allaqachon mavjud" in resp2.json()["detail"]
 
@@ -110,3 +121,25 @@ async def test_auth_endpoints(client: httpx.AsyncClient):
     assert resp_logout.status_code == 200
     assert resp_logout.json()["ok"] is True
 
+
+@pytest.mark.asyncio
+async def test_new_api_routers_require_auth(client: httpx.AsyncClient):
+    protected_requests = [
+        ("GET", "/api/cargos", None),
+        ("GET", "/api/reys", None),
+        ("GET", "/api/bin", None),
+        ("GET", "/api/custom-types", None),
+        ("GET", "/api/dashboard/stats", None),
+        ("GET", "/api/backup/stats", None),
+        ("POST", "/api/entries/json", {
+            "reys_id": 1,
+            "box_code": "BOX-UNAUTH",
+            "tovar_turi": "mandarin",
+            "gross_weight": 1.0,
+            "tare_weight": 0.0,
+        }),
+    ]
+
+    for method, path, json_body in protected_requests:
+        resp = await client.request(method, path, json=json_body)
+        assert resp.status_code == 401, f"{method} {path} should require auth"

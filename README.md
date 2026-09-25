@@ -34,11 +34,11 @@ Telegram only opens Mini Apps over HTTPS. For local testing, expose the
 server with a tunnel and put that url in `WEBAPP_URL`:
 
 ```bash
-cloudflared tunnel --url http://localhost:8080
-# or: ngrok http 8080
+cloudflared tunnel --url http://localhost:8000
+# or: ngrok http 8000
 ```
 
-You can also open `http://localhost:8080/` directly in a browser — outside
+You can also open `http://localhost:8000/` directly in a browser — outside
 Telegram a fallback **Saqlash** button appears (initData will be empty, so the
 API rejects it; useful for UI work only).
 

@@ -136,7 +136,7 @@ WEBAPP_URL: str = os.getenv("WEBAPP_URL", "").strip()
 # Bind to localhost by default — the public tunnel (cloudflared) connects locally,
 # so the port need not be exposed on the LAN. Set 0.0.0.0 only if you must.
 HOST: str = os.getenv("HOST", "127.0.0.1")
-PORT: int = int(os.getenv("PORT", "8080"))
+PORT: int = int(os.getenv("PORT", "8000"))
 
 # Reject initData older than this many seconds (replay protection). 0 disables.
 INITDATA_MAX_AGE: int = int(os.getenv("INITDATA_MAX_AGE", "86400"))

@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.cargo import CargoCreate
-from app.schemas.entry import EntryCreate
+from app.schemas.entry import EntryAdjustmentCreate, EntryCreate
 from app.schemas.reys import ReysCreate
 from app.services.cargo_service import CargoService
 from app.services.entry_service import EntryService
@@ -73,3 +73,76 @@ async def test_entry_validations_and_lifecycle(db_session: AsyncSession):
     await entry_service.restore_entry(entry.id)
     restored_reys = await reys_service.get_reys(reys.id)
     assert restored_reys.toza_kg == 13.5
+
+
+@pytest.mark.asyncio
+async def test_entry_photo_r2_failure_falls_back_to_disk(db_session: AsyncSession, monkeypatch):
+    cargo_service = CargoService(db_session)
+    reys_service = ReysService(db_session)
+    entry_service = EntryService(db_session)
+
+    cargo = await cargo_service.create_cargo(CargoCreate(code="CARGO-R2-FALLBACK"))
+    reys = await reys_service.create_reys(ReysCreate(
+        cargo_id=cargo.id,
+        code="REYS-R2-FALLBACK",
+        date="2026-09-24",
+    ))
+
+    from app import storage
+
+    monkeypatch.setattr(storage, "r2_enabled", lambda: True)
+
+    def fail_put_photo(*args, **kwargs):
+        raise RuntimeError("r2 down")
+
+    monkeypatch.setattr(storage, "put_photo", fail_put_photo)
+
+    entry = await entry_service.record_entry(
+        EntryCreate(
+            reys_id=reys.id,
+            box_code="BOX-R2-FALLBACK",
+            tovar_turi="mandarin",
+            gross_weight=10.0,
+            tare_weight=1.0,
+        ),
+        photos=[(b"not-really-an-image", "image/jpeg")],
+    )
+
+    assert entry.photos is not None
+    assert len(entry.photos) == 1
+    assert entry.photos[0].storage_backend == "disk"
+
+
+@pytest.mark.asyncio
+async def test_adjust_inventory_moves_weight_without_changing_reys_total(db_session: AsyncSession):
+    cargo_service = CargoService(db_session)
+    reys_service = ReysService(db_session)
+    entry_service = EntryService(db_session)
+
+    cargo = await cargo_service.create_cargo(CargoCreate(code="CARGO-ADJUST-TEST"))
+    reys = await reys_service.create_reys(ReysCreate(
+        cargo_id=cargo.id,
+        code="REYS-ADJUST-TEST",
+        date="2026-09-24",
+    ))
+
+    await entry_service.record_entry(EntryCreate(
+        reys_id=reys.id,
+        box_code="BOX-ADJUST-SOURCE",
+        tovar_turi="mandarin",
+        gross_weight=110.0,
+        tare_weight=10.0,
+    ))
+
+    res = await entry_service.adjust_inventory(EntryAdjustmentCreate(
+        reys_id=reys.id,
+        from_type="mandarin",
+        to_type="apelsin",
+        weight=25.0,
+    ))
+
+    assert res.balances["mandarin"] == 75.0
+    assert res.balances["apelsin"] == 25.0
+
+    unchanged_reys = await reys_service.get_reys(reys.id)
+    assert unchanged_reys.toza_kg == 100.0

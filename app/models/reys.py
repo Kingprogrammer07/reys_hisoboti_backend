@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Optional
-from sqlalchemy import BigInteger, Float, ForeignKey, String
+from sqlalchemy import BigInteger, Float, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from ..database import Base
@@ -14,6 +14,10 @@ if TYPE_CHECKING:
 
 class Reys(Base):
     __tablename__ = "reyslar"
+    __table_args__ = (
+        Index("ix_reys_cargo_deleted_id", "cargo_id", "deleted_at", "id"),
+        Index("ix_reys_deleted_id", "deleted_at", "id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     cargo_id: Mapped[Optional[int]] = mapped_column(

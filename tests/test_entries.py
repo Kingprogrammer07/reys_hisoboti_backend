@@ -2,7 +2,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.cargo import CargoCreate
-from app.schemas.entry import EntryAdjustmentCreate, EntryCreate
+from app.schemas.entry import EntryAdjustmentCreate, EntryCreate, EntryUpdate
 from app.schemas.reys import ReysCreate
 from app.services.cargo_service import CargoService
 from app.services.entry_service import EntryService
@@ -146,3 +146,46 @@ async def test_adjust_inventory_moves_weight_without_changing_reys_total(db_sess
 
     unchanged_reys = await reys_service.get_reys(reys.id)
     assert unchanged_reys.toza_kg == 100.0
+
+
+@pytest.mark.asyncio
+async def test_update_entry_recomputes_inventory_and_reys_total(db_session: AsyncSession):
+    cargo_service = CargoService(db_session)
+    reys_service = ReysService(db_session)
+    entry_service = EntryService(db_session)
+
+    cargo = await cargo_service.create_cargo(CargoCreate(code="CARGO-ENTRY-EDIT"))
+    reys = await reys_service.create_reys(ReysCreate(
+        cargo_id=cargo.id,
+        code="REYS-ENTRY-EDIT",
+        date="2026-09-24",
+    ))
+
+    entry = await entry_service.record_entry(EntryCreate(
+        reys_id=reys.id,
+        box_code="BOX-OLD",
+        tovar_turi="mandarin",
+        gross_weight=20.0,
+        tare_weight=2.0,
+    ))
+
+    updated = await entry_service.update_entry(entry.id, EntryUpdate(
+        box_code="BOX-NEW",
+        tovar_turi="apelsin",
+        gross_weight=30.0,
+        tare_weight=3.0,
+    ))
+
+    assert updated.boxCode == "BOX-NEW"
+    assert updated.tovar_turi == "apelsin"
+    assert updated.netWeight == 27.0
+
+    mandarin = await entry_service.inv_repo.get_by_reys_and_type(reys.id, "mandarin")
+    apelsin = await entry_service.inv_repo.get_by_reys_and_type(reys.id, "apelsin")
+    assert mandarin.weight == 0.0
+    assert mandarin.package_count == 0
+    assert apelsin.weight == 27.0
+    assert apelsin.package_count == 1
+
+    updated_reys = await reys_service.get_reys(reys.id)
+    assert updated_reys.toza_kg == 27.0

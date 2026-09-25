@@ -35,6 +35,23 @@ class EntryCreate(BaseModel):
         return v
 
 
+class EntryUpdate(BaseModel):
+    box_code: str = Field(..., min_length=1, max_length=60, description="Karobka kodi / shtrix-kod")
+    tovar_turi: str = Field(..., min_length=1, max_length=60, description="Tovar turi")
+    gross_weight: float = Field(..., gt=0.0, description="Og'irlik (Gross weight, W)")
+    tare_weight: float = Field(0.0, description="Karobka og'irligi (Tare weight, T)")
+    coefficient_mode: str = Field("none", description="none | box | fixed | custom")
+
+    @field_validator("tare_weight")
+    @classmethod
+    def validate_tare_weight(cls, v: float) -> float:
+        if v < 0:
+            raise ValueError("Karobka og'irligi manfiy bo'lishi mumkin emas")
+        if v > 10.0:
+            raise ValueError("Karobka og'irligi 10 kg dan oshmasligi kerak (ADR-001)")
+        return v
+
+
 class EntryAdjustmentCreate(BaseModel):
     reys_id: int = Field(..., description="Tegishli Reys ID")
     from_type: str = Field(..., min_length=1, max_length=60)

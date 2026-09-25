@@ -16,7 +16,7 @@ from ..repositories.cargo_repo import CargoRepository
 from ..repositories.entry_repo import EntryRepository
 from ..repositories.inventory_repo import InventoryRepository
 from ..repositories.reys_repo import ReysRepository
-from ..schemas.entry import EntryAdjustmentCreate, EntryAdjustmentResponse, EntryCreate, EntryResponse, PhotoMetadata
+from ..schemas.entry import EntryAdjustmentCreate, EntryAdjustmentResponse, EntryCreate, EntryResponse, EntryUpdate, PhotoMetadata
 
 log = logging.getLogger("reys.entry_service")
 
@@ -231,6 +231,85 @@ class EntryService:
             net=net,
             coefficient_mode=data.coefficient_mode,
             photos_count=len(photos_list),
+            created_at=int(time.time()),
+        )
+        self.session.add(activity)
+
+        await self.session.flush()
+        await self.session.refresh(entry, ["photos"])
+        return self._to_response(entry)
+
+    @staticmethod
+    def _clean_weights(gross_weight: float, tare_weight: float, coefficient_mode: str = "none") -> tuple[float, float, float]:
+        gross = round(float(gross_weight), 3)
+        tare = round(float(tare_weight or 0.0), 3)
+
+        if gross <= 0:
+            raise ValueError("Umumiy og'irlik musbat bo'lishi kerak")
+        if tare < 0:
+            raise ValueError("Karobka og'irligi manfiy bo'lishi mumkin emas")
+        if tare > 10.0:
+            raise ValueError("Karobka og'irligi 10 kg dan oshmasligi kerak (ADR-001)")
+        if gross > 3.0 and tare > 0.5 * gross:
+            raise ValueError("Karobka og'irligi umumiy og'irlikning 50% idan oshmasligi kerak (ADR-002)")
+        if (coefficient_mode or "").strip().lower() != "box" and tare >= gross:
+            raise ValueError("Karobka og'irligi umumiy og'irlikdan kichik bo'lishi kerak")
+
+        net = gross if (coefficient_mode or "").strip().lower() == "box" else round(gross - tare, 3)
+        if net <= 0:
+            raise ValueError("Sof vazn 0 dan katta bo'lishi kerak")
+        return gross, tare, net
+
+    async def update_entry(self, entry_id: int, data: EntryUpdate) -> EntryResponse:
+        entry = await self.entry_repo.get_by_id(entry_id)
+        if not entry:
+            raise ValueError("Yozuv topilmadi")
+
+        gross, tare, net = self._clean_weights(data.gross_weight, data.tare_weight, data.coefficient_mode)
+        old_type = entry.tovar_turi
+        old_net = entry.net_weight
+        new_type = data.tovar_turi.strip().lower()
+
+        entry.box_code = data.box_code.strip()
+        entry.tovar_turi = new_type
+        entry.gross_weight = gross
+        entry.tare_weight = tare
+        entry.net_weight = net
+        entry.coefficient_mode = data.coefficient_mode.strip().lower()
+
+        if old_type == new_type:
+            await self.inv_repo.upsert_inventory(
+                reys_id=entry.reys_id,
+                tovar_turi=new_type,
+                weight_delta=net - old_net,
+                count_delta=0,
+            )
+        else:
+            await self.inv_repo.upsert_inventory(
+                reys_id=entry.reys_id,
+                tovar_turi=old_type,
+                weight_delta=-old_net,
+                count_delta=-1,
+            )
+            await self.inv_repo.upsert_inventory(
+                reys_id=entry.reys_id,
+                tovar_turi=new_type,
+                weight_delta=net,
+                count_delta=1,
+            )
+
+        await self.reys_repo.recompute_totals(entry.reys_id)
+
+        activity = ActivityLog(
+            reys_id=entry.reys_id,
+            actor=entry.created_by,
+            action="edit",
+            tovar_turi=entry.tovar_turi,
+            weight=gross,
+            box_weight=tare,
+            net=net,
+            coefficient_mode=entry.coefficient_mode,
+            photos_count=len(entry.__dict__.get("photos") or []),
             created_at=int(time.time()),
         )
         self.session.add(activity)

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import config, storage
 from ..auth import require_session
 from ..database import get_db_session
-from ..schemas.entry import EntryAdjustmentCreate, EntryAdjustmentResponse, EntryCreate, EntryListResponse, EntryResponse
+from ..schemas.entry import EntryAdjustmentCreate, EntryAdjustmentResponse, EntryCreate, EntryListResponse, EntryResponse, EntryUpdate
 from ..services.entry_service import EntryService
 
 router = APIRouter(tags=["entries"], dependencies=[Depends(require_session)])
@@ -105,6 +105,20 @@ async def get_entry(
     if not entry:
         raise HTTPException(status_code=404, detail="Yozuv topilmadi")
     return entry
+
+
+@router.put("/api/entries/{entry_id}", response_model=EntryResponse)
+async def update_entry(
+    entry_id: int,
+    data: EntryUpdate,
+    service: EntryService = Depends(get_service),
+):
+    try:
+        return await service.update_entry(entry_id, data)
+    except ValueError as e:
+        detail = str(e)
+        status_code = 404 if "topilmadi" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail)
 
 
 @router.delete("/api/entries/{entry_id}")

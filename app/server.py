@@ -14,7 +14,9 @@ import logging
 import time
 from urllib.parse import quote, urlparse
 
-from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request, UploadFile
+from sqlalchemy.ext.asyncio import AsyncSession
+from .database import get_db_session
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -427,18 +429,15 @@ async def wa_auth_complete(request: Request):
 
 
 def _identity(request: Request, init_data: str = "", state_changing: bool = True) -> str:
-    """Return an identity from initData (Telegram) or session cookie (browser).
-
-    Telegram initData may arrive in the form body (POST) or the
-    `X-Telegram-Init-Data` header (GET). The same-origin (CSRF) check applies
-    only to cookie-authenticated state-changing requests.
-    """
+    """Return an identity from initData (Telegram), Bearer token, or session cookie (browser)."""
     idata = init_data or request.headers.get("x-telegram-init-data", "")
     if idata:
         return f"tg:{authenticate_admin(idata).id}"  # raises on failure
-    if state_changing and not _same_origin(request):
+    auth_header = request.headers.get("authorization", "")
+    has_bearer = auth_header.startswith("Bearer ")
+    if state_changing and not has_bearer and not _same_origin(request):
         raise InitDataError("Yaroqsiz so'rov manbasi (CSRF himoyasi)")
-    user = verify_session(request.cookies.get(SESSION_COOKIE, ""))
+    user = session_user_from_request(request)
     if user is None:
         raise InitDataError("Tizimga kirilmagan (Avtorizatsiya talab etiladi)")
     return f"pw:{user}"
@@ -901,18 +900,27 @@ async def api_entries_status(request: Request, report_id: int | None = None, kin
 
 
 @app.get("/api/export/kargo")
-async def api_export_kargo(request: Request, report_id: int | None = None):
+async def api_export_kargo(
+    request: Request,
+    report_id: int | None = None,
+    reys_id: int | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
     _auth_or_403(request, state_changing=False)
-    rid = _require_report(report_id)
+    target_id = reys_id or report_id
     try:
-        content, filename = excel_export.build_kargo_excel(rid)
+        content, filename = await excel_export.build_kargo_excel_async(
+            session, reys_id=target_id, start=start, end=end
+        )
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="excel namunasi topilmadi")
     except ModuleNotFoundError as exc:
         log.exception("excel export dependency missing")
         raise HTTPException(status_code=500, detail=f"excel kutubxonasi topilmadi: {exc.name}")
     except Exception as exc:
-        log.exception("excel export failed: report_id=%s", rid)
+        log.exception("excel export failed: target_id=%s start=%s end=%s", target_id, start, end)
         raise HTTPException(status_code=500, detail=f"excel yaratishda xato: {exc}")
     headers = {
         "Content-Disposition": (
@@ -928,16 +936,21 @@ async def api_export_kargo(request: Request, report_id: int | None = None):
 
 
 @app.get("/api/export/obshiy")
-async def api_export_obshiy(request: Request, report_id: int | None = None):
+async def api_export_obshiy(
+    request: Request,
+    report_id: int | None = None,
+    reys_id: int | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
     _auth_or_403(request, state_changing=False)
-    rid = _require_report(report_id)
+    target_id = reys_id or report_id
     try:
-        content, filename = excel_export.build_obshiy_excel(rid)
+        content, filename = await excel_export.build_obshiy_excel_async(session, reys_id=target_id)
     except ModuleNotFoundError as exc:
         log.exception("obshiy excel export dependency missing")
         raise HTTPException(status_code=500, detail=f"excel kutubxonasi topilmadi: {exc.name}")
     except Exception as exc:
-        log.exception("obshiy excel export failed: report_id=%s", rid)
+        log.exception("obshiy excel export failed: target_id=%s", target_id)
         raise HTTPException(status_code=500, detail=f"excel yaratishda xato: {exc}")
     headers = {
         "Content-Disposition": (
@@ -953,16 +966,21 @@ async def api_export_obshiy(request: Request, report_id: int | None = None):
 
 
 @app.get("/api/export/summary")
-async def api_export_summary(request: Request, report_id: int | None = None):
+async def api_export_summary(
+    request: Request,
+    report_id: int | None = None,
+    reys_id: int | None = None,
+    session: AsyncSession = Depends(get_db_session),
+):
     _auth_or_403(request, state_changing=False)
-    rid = _require_report(report_id)
+    target_id = reys_id or report_id
     try:
-        content, filename = excel_export.build_umumiy_excel(rid)
+        content, filename = await excel_export.build_umumiy_excel_async(session, reys_id=target_id)
     except ModuleNotFoundError as exc:
         log.exception("summary excel export dependency missing")
         raise HTTPException(status_code=500, detail=f"excel kutubxonasi topilmadi: {exc.name}")
     except Exception as exc:
-        log.exception("summary excel export failed: report_id=%s", rid)
+        log.exception("summary excel export failed: target_id=%s", target_id)
         raise HTTPException(status_code=500, detail=f"excel yaratishda xato: {exc}")
     headers = {
         "Content-Disposition": (

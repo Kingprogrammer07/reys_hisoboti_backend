@@ -38,8 +38,10 @@ def get_async_database_url() -> str:
 
     parts = urlsplit(raw_url)
     scheme = parts.scheme
+    netloc = parts.netloc
     if scheme in ("postgres", "postgresql"):
         scheme = "postgresql+asyncpg"
+        netloc = netloc.replace("-pooler.", ".")
     elif scheme in ("sqlite", "sqlite3"):
         scheme = "sqlite+aiosqlite"
 
@@ -52,7 +54,7 @@ def get_async_database_url() -> str:
             query_params["ssl"] = ["require"]
 
     new_query = urlencode(query_params, doseq=True)
-    return urlunsplit((scheme, parts.netloc, parts.path, new_query, parts.fragment))
+    return urlunsplit((scheme, netloc, parts.path, new_query, parts.fragment))
 
 
 ASYNC_DATABASE_URL = get_async_database_url()

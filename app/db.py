@@ -111,6 +111,10 @@ def _db():
             conn.close()
 
 
+def _tables(c: sqlite3.Connection) -> set[str]:
+    return {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+
 def _columns(c: sqlite3.Connection, table: str) -> set[str]:
     return {r[1] for r in c.execute(f"PRAGMA table_info({table})")}
 
@@ -449,9 +453,14 @@ def list_reports() -> list[dict]:
 
 def report_exists(report_id: int) -> bool:
     with _db() as c:
-        return c.execute(
+        row = c.execute(
             "SELECT 1 FROM reports WHERE id = ? AND deleted_at IS NULL", (report_id,)
-        ).fetchone() is not None
+        ).fetchone()
+        if not row and "reyslar" in _tables(c):
+            row = c.execute(
+                "SELECT 1 FROM reyslar WHERE id = ? AND deleted_at IS NULL", (report_id,)
+            ).fetchone()
+        return row is not None
 
 
 def delete_report(report_id: int) -> None:
@@ -529,6 +538,12 @@ def _inventory(c: sqlite3.Connection, report_id: int) -> dict[str, float]:
 
 def get_inventory(report_id: int) -> dict[str, float]:
     with _db() as c:
+        if "inventory_v2" in _tables(c):
+            inv = {r["tovar_turi"]: r["weight"] for r in c.execute(
+                "SELECT tovar_turi, weight FROM inventory_v2 WHERE reys_id = ? ORDER BY tovar_turi", (report_id,)
+            )}
+            if inv:
+                return inv
         return _inventory(c, report_id)
 
 
@@ -994,6 +1009,8 @@ def get_entry_any(entry_id: int) -> dict | None:
 def report_name(report_id: int) -> str | None:
     with _db() as c:
         row = c.execute("SELECT name FROM reports WHERE id = ?", (report_id,)).fetchone()
+        if not row and "reyslar" in _tables(c):
+            row = c.execute("SELECT COALESCE(custom_name, code) AS name FROM reyslar WHERE id = ?", (report_id,)).fetchone()
     return row["name"] if row else None
 
 
@@ -1007,27 +1024,103 @@ def list_entries(report_id: int, action: str, limit: int = 1000) -> list[dict]:
                ORDER BY id DESC LIMIT ?""",
             (report_id, action, limit),
         ).fetchall()
+        if rows:
+            out = []
+            for r in rows:
+                photos = [dict(p) for p in c.execute(
+                    "SELECT idx, telegram_file_id FROM entry_photos WHERE entry_id = ? ORDER BY idx",
+                    (r["id"],),
+                )]
+                sq = c.execute(
+                    """SELECT status, last_error, last_attempt_at, last_error_at, attempts, next_at
+                       FROM send_queue WHERE entry_id = ?""",
+                    (r["id"],),
+                ).fetchone()
+                d = dict(r)
+                d["photo_idxs"] = [p["idx"] for p in photos]
+                d["photo_file_ids"] = [p["telegram_file_id"] for p in photos]
+                d["send_status"] = sq["status"] if sq else None
+                d["send_error"] = sq["last_error"] if sq else None
+                d["send_last_attempt_at"] = sq["last_attempt_at"] if sq else None
+                d["send_error_at"] = sq["last_error_at"] if sq else None
+                d["send_attempts"] = sq["attempts"] if sq else None
+                d["send_next_at"] = sq["next_at"] if sq else None
+                out.append(d)
+            return out
+
+        tables = _tables(c)
         out = []
-        for r in rows:
-            photos = [dict(p) for p in c.execute(
-                "SELECT idx, telegram_file_id FROM entry_photos WHERE entry_id = ? ORDER BY idx",
-                (r["id"],),
-            )]
-            sq = c.execute(
-                """SELECT status, last_error, last_attempt_at, last_error_at, attempts, next_at
-                   FROM send_queue WHERE entry_id = ?""",
-                (r["id"],),
-            ).fetchone()
-            d = dict(r)
-            d["photo_idxs"] = [p["idx"] for p in photos]
-            d["photo_file_ids"] = [p["telegram_file_id"] for p in photos]
-            d["send_status"] = sq["status"] if sq else None
-            d["send_error"] = sq["last_error"] if sq else None
-            d["send_last_attempt_at"] = sq["last_attempt_at"] if sq else None
-            d["send_error_at"] = sq["last_error_at"] if sq else None
-            d["send_attempts"] = sq["attempts"] if sq else None
-            d["send_next_at"] = sq["next_at"] if sq else None
-            out.append(d)
+        if action == "reys" and "entries" in tables:
+            erows = c.execute(
+                """SELECT id, reys_id AS report_id, created_at AS ts, created_by AS actor,
+                          'reys' AS action, tovar_turi, gross_weight AS weight,
+                          tare_weight AS coefficient, tare_weight AS box_weight,
+                          coefficient_mode, net_weight AS net, 0 AS photos
+                   FROM entries
+                   WHERE reys_id = ? AND deleted_at IS NULL
+                   ORDER BY id DESC LIMIT ?""",
+                (report_id, limit),
+            ).fetchall()
+            for r in erows:
+                d = dict(r)
+                d["photo_idxs"] = []
+                d["photo_file_ids"] = []
+                d["send_status"] = None
+                d["send_error"] = None
+                d["send_last_attempt_at"] = None
+                d["send_error_at"] = None
+                d["send_attempts"] = None
+                d["send_next_at"] = None
+                out.append(d)
+        elif action == "adjust" and "activity_logs_v2" in tables:
+            arows = c.execute(
+                """SELECT id, reys_id AS report_id, created_at AS ts, actor,
+                          action, from_type, to_type, weight, net, photos_count AS photos
+                   FROM activity_logs_v2
+                   WHERE reys_id = ? AND action = 'adjust'
+                   ORDER BY id DESC LIMIT ?""",
+                (report_id, limit),
+            ).fetchall()
+            for r in arows:
+                d = dict(r)
+                d["photo_idxs"] = []
+                d["photo_file_ids"] = []
+                d["send_status"] = None
+                d["send_error"] = None
+                d["send_last_attempt_at"] = None
+                d["send_error_at"] = None
+                d["send_attempts"] = None
+                d["send_next_at"] = None
+                out.append(d)
+        elif action in ("top", "topchiqgan", "bizda", "chiqgan") and "entries" in tables:
+            patterns = {
+                "top": ("top", "TOP"),
+                "topchiqgan": ("top'dan chiqgan", "topdan chiqgan", "topchiqgan", "top_dan_chiqgan", "TOP'dan chiqgan"),
+                "bizda": ("bizda qoladigan", "bizda", "bizda_qoladigan", "Bizda qoladigan"),
+                "chiqgan": ("bizdan chiqgan", "chiqgan", "bizdan_chiqgan", "Bizdan chiqgan"),
+            }.get(action, ())
+            placeholders = ",".join("?" for _ in patterns)
+            orows = c.execute(
+                f"""SELECT id, reys_id AS report_id, created_at AS ts, created_by AS actor,
+                           ? AS action, box_code AS tovar_turi, gross_weight AS weight,
+                           tare_weight AS coefficient, tare_weight AS box_weight,
+                           coefficient_mode, net_weight AS net, 0 AS photos
+                    FROM entries
+                    WHERE reys_id = ? AND deleted_at IS NULL AND tovar_turi IN ({placeholders})
+                    ORDER BY id DESC LIMIT ?""",
+                (action, report_id, *patterns, limit),
+            ).fetchall()
+            for r in orows:
+                d = dict(r)
+                d["photo_idxs"] = []
+                d["photo_file_ids"] = []
+                d["send_status"] = None
+                d["send_error"] = None
+                d["send_last_attempt_at"] = None
+                d["send_error_at"] = None
+                d["send_attempts"] = None
+                d["send_next_at"] = None
+                out.append(d)
     return out
 
 

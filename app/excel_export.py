@@ -1,9 +1,15 @@
 """Excel exports for report views."""
 from __future__ import annotations
 
+import datetime
 import re
+import time
 from copy import copy
 from io import BytesIO
+from typing import Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import config, db
 
@@ -14,6 +20,12 @@ LEGACY_OBSHIY_TEMPLATE = config.BASE_DIR / "obshiy_ves_shablon.xlsx"
 UMUMIY_TEMPLATE = config.ASSETS_DIR / "umumiy_hisobot_shabloni.xlsx"
 LEGACY_UMUMIY_TEMPLATE = config.BASE_DIR / "umumiy_hisobot_shabloni.xlsx"
 OBSHIY_ACTION_ORDER = ("top", "topchiqgan", "bizda", "chiqgan")
+
+OBSHIY_TYPES = {
+    "top", "top'dan chiqgan", "topdan chiqgan", "topchiqgan", "top_dan_chiqgan",
+    "bizda qoladigan", "bizda", "bizda_qoladigan", "bizdan chiqgan", "chiqgan", "bizdan_chiqgan",
+    "umumiy hisobot"
+}
 
 
 def _safe_sheet_name(name: str) -> str:
@@ -54,11 +66,17 @@ def _entry_expr_and_value(entry: dict) -> tuple[str, float]:
     weight = _num(entry.get("weight"))
     coef = _num(entry.get("coefficient"))
     net = _num(entry.get("net"))
+    mode = str(entry.get("coefficient_mode") or "").strip().lower()
+
+    if mode == "box":
+        # Box mode: Net is gross, tare is box weight
+        return _formula_num(net or weight), net or weight
+
     if coef > 0:
         if not net:
             net = round(weight - coef, 4)
         return f"{_formula_num(weight)}-{_formula_num(coef)}", net
-    return _formula_num(net), net
+    return _formula_num(net or weight), net or weight
 
 
 def _slot_value(slot: dict) -> float:
@@ -157,46 +175,48 @@ def _sum_obshiy_values_by_code(entries: list[dict]) -> tuple[dict[str, float], l
     return totals, order
 
 
-def _ordered_codes(*orders: list[str]) -> list[str]:
-    out: list[str] = []
+def _ordered_codes(*groups: list[str]) -> list[str]:
     seen: set[str] = set()
-    for order in orders:
-        for code in order:
+    order: list[str] = []
+    for group in groups:
+        for code in group:
             if code not in seen:
                 seen.add(code)
-                out.append(code)
-    return out
+                order.append(code)
+    return order
 
 
-def _obshiy_rows(base: dict[str, float], plus: dict[str, float], minus: dict[str, float],
-                 order: list[str]) -> list[tuple[str, float, float]]:
-    rows = []
+def _obshiy_rows(
+    base: dict[str, float],
+    plus: dict[str, float],
+    minus: dict[str, float],
+    order: list[str],
+) -> list[tuple[str, float, float]]:
+    rows: list[tuple[str, float, float]] = []
     for code in order:
-        base_value = _num(base.get(code, 0))
-        transfer = round(_num(plus.get(code, 0)) - _num(minus.get(code, 0)), 4)
-        if base_value or transfer:
-            rows.append((code, base_value, transfer))
+        b = base.get(code, 0.0)
+        p = plus.get(code, 0.0)
+        m = minus.get(code, 0.0)
+        transfer = round(p - m, 4)
+        if b != 0 or transfer != 0:
+            rows.append((code, b, transfer))
     return rows
 
 
-def _write_obshiy_sheet(ws, rows: list[tuple[str, float, float]], transfer_header: dict[str, str]) -> None:
-    from openpyxl.styles import Alignment
+def _write_obshiy_sheet(ws, rows: list[tuple[str, float, float]], context: dict[str, str]) -> None:
+    ws.cell(1, 1).value = "kod"
+    ws.cell(1, 2).value = context["sheet"]
+    ws.cell(1, 3).value = context["column"]
+    ws.cell(1, 4).value = "jami"
 
-    ws.title = transfer_header["sheet"]
-    headers = ["Karobka kodi", "karobka kg", transfer_header["column"], "jami"]
-    for col, header in enumerate(headers, start=1):
-        cell = ws.cell(1, col)
-        cell.value = header
-        cell.alignment = Alignment(horizontal="center", vertical="center")
-
-    clear_until = max(ws.max_row, len(rows) + 1)
-    for r in range(2, clear_until + 1):
+    for r in range(2, max(ws.max_row, len(rows) + 2) + 1):
         for c in range(1, 5):
             ws.cell(r, c).value = None
 
-    for idx, (code, base_value, transfer) in enumerate(rows, start=2):
+    for offset, (code, base, transfer) in enumerate(rows):
+        idx = 2 + offset
         ws.cell(idx, 1).value = code
-        ws.cell(idx, 2).value = base_value
+        ws.cell(idx, 2).value = base
         ws.cell(idx, 3).value = transfer
         ws.cell(idx, 4).value = None
         for col in (2, 3):
@@ -209,18 +229,13 @@ def _write_obshiy_sheet(ws, rows: list[tuple[str, float, float]], transfer_heade
     total_cell.number_format = "0.00"
 
 
-def build_obshiy_excel(report_id: int) -> tuple[bytes, str]:
+def render_obshiy_excel(report_name: str, entries_by_action: dict[str, list[dict]]) -> tuple[bytes, str]:
     from openpyxl import Workbook, load_workbook
 
-    report_name = db.report_name(report_id) or "Hisobot"
-    entries_by_action = {
-        action: list(reversed(db.list_entries(report_id, action, limit=2000)))
-        for action in OBSHIY_ACTION_ORDER
-    }
-    top, top_order = _sum_obshiy_values_by_code(entries_by_action["top"])
-    topchiqgan, topchiqgan_order = _sum_obshiy_values_by_code(entries_by_action["topchiqgan"])
-    bizda, bizda_order = _sum_obshiy_values_by_code(entries_by_action["bizda"])
-    chiqgan, chiqgan_order = _sum_obshiy_values_by_code(entries_by_action["chiqgan"])
+    top, top_order = _sum_obshiy_values_by_code(entries_by_action.get("top", []))
+    topchiqgan, topchiqgan_order = _sum_obshiy_values_by_code(entries_by_action.get("topchiqgan", []))
+    bizda, bizda_order = _sum_obshiy_values_by_code(entries_by_action.get("bizda", []))
+    chiqgan, chiqgan_order = _sum_obshiy_values_by_code(entries_by_action.get("chiqgan", []))
 
     top_rows = _obshiy_rows(
         top,
@@ -268,6 +283,71 @@ def build_obshiy_excel(report_id: int) -> tuple[bytes, str]:
     return out.getvalue(), _safe_obshiy_filename(report_name)
 
 
+def build_obshiy_excel(report_id: int) -> tuple[bytes, str]:
+    report_name = db.report_name(report_id) or "Hisobot"
+    entries_by_action = {
+        action: list(reversed(db.list_entries(report_id, action, limit=2000)))
+        for action in OBSHIY_ACTION_ORDER
+    }
+    return render_obshiy_excel(report_name, entries_by_action)
+
+
+async def build_obshiy_excel_async(session: AsyncSession, reys_id: int | None = None) -> tuple[bytes, str]:
+    from .models.cargo import Cargo
+    from .models.entry import Entry
+    from .models.reys import Reys
+
+    target_id = reys_id
+    if not target_id:
+        latest = (await session.execute(
+            select(Reys).where(Reys.deleted_at.is_(None)).order_by(Reys.id.desc()).limit(1)
+        )).scalar_one_or_none()
+        if latest:
+            target_id = latest.id
+        else:
+            return render_obshiy_excel("Hisobot", {a: [] for a in OBSHIY_ACTION_ORDER})
+
+    reys = (await session.execute(
+        select(Reys).where(Reys.id == target_id, Reys.deleted_at.is_(None))
+    )).scalar_one_or_none()
+    if not reys:
+        return build_obshiy_excel(target_id)
+
+    cargo_code = ""
+    if reys.cargo_id:
+        cargo = (await session.execute(select(Cargo).where(Cargo.id == reys.cargo_id))).scalar_one_or_none()
+        if cargo:
+            cargo_code = cargo.code
+    report_name = f"{cargo_code + ' ' if cargo_code else ''}{reys.code}{' ' + reys.custom_name if reys.custom_name else ''}".strip()
+
+    entries_models = (await session.execute(
+        select(Entry).where(Entry.reys_id == reys.id, Entry.deleted_at.is_(None)).order_by(Entry.id.asc())
+    )).scalars().all()
+
+    entries_by_action: dict[str, list[dict]] = {a: [] for a in OBSHIY_ACTION_ORDER}
+    for e in entries_models:
+        t = (e.tovar_turi or "").strip().lower()
+        cat = None
+        if t == "top":
+            cat = "top"
+        elif t in ("top'dan chiqgan", "topdan chiqgan", "topchiqgan", "top_dan_chiqgan"):
+            cat = "topchiqgan"
+        elif t in ("bizda qoladigan", "bizda", "bizda_qoladigan"):
+            cat = "bizda"
+        elif t in ("bizdan chiqgan", "chiqgan", "bizdan_chiqgan"):
+            cat = "chiqgan"
+        if cat:
+            entries_by_action[cat].append({
+                "tovar_turi": e.box_code or "Kodsiz",
+                "weight": e.gross_weight,
+                "coefficient": e.tare_weight,
+                "box_weight": e.tare_weight,
+                "net": e.net_weight,
+            })
+
+    return render_obshiy_excel(report_name, entries_by_action)
+
+
 def _summary_type_key(tovar_turi: str) -> str:
     key = str(tovar_turi or "").strip().lower()
     if key == "one":
@@ -311,18 +391,18 @@ def _copy_row_style(ws, source_row: int, target_row: int, max_col: int) -> None:
         dst.border = copy(src.border)
 
 
-def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
+def render_umumiy_excel(
+    report_name: str,
+    obshiy_entries: dict[str, list[dict]],
+    reys_entries: list[dict],
+    inv: dict[str, float],
+) -> tuple[bytes, str]:
     from datetime import date
     from openpyxl import Workbook, load_workbook
 
-    report_name = db.report_name(report_id) or "Hisobot"
-    obshiy_entries = {
-        action: list(reversed(db.list_entries(report_id, action, limit=2000)))
-        for action in OBSHIY_ACTION_ORDER
-    }
-    topchiqgan, topchiqgan_order = _sum_obshiy_values_by_code(obshiy_entries["topchiqgan"])
-    bizda, bizda_order = _sum_obshiy_values_by_code(obshiy_entries["bizda"])
-    chiqgan, chiqgan_order = _sum_obshiy_values_by_code(obshiy_entries["chiqgan"])
+    topchiqgan, topchiqgan_order = _sum_obshiy_values_by_code(obshiy_entries.get("topchiqgan", []))
+    bizda, bizda_order = _sum_obshiy_values_by_code(obshiy_entries.get("bizda", []))
+    chiqgan, chiqgan_order = _sum_obshiy_values_by_code(obshiy_entries.get("chiqgan", []))
     bizda_rows = _obshiy_rows(
         bizda,
         plus=topchiqgan,
@@ -331,11 +411,10 @@ def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
     )
 
     bizda_total = round(sum(round(base + transfer, 4) for _, base, transfer in bizda_rows), 4)
-    reys_entries = list(reversed(db.list_entries(report_id, "reys", limit=2000)))
     box_weight_total = _summary_box_weight(obshiy_entries, reys_entries)
-    inv = _inventory_for_summary(report_id)
-    top_inventory = _num(inv.get("top", 0))
-    inv["top"] = 0.0
+    normalized_inv = {_summary_type_key(k): _num(v) for k, v in inv.items() if _summary_type_key(k)}
+    top_inventory = _num(normalized_inv.get("top", 0))
+    normalized_inv["top"] = 0.0
 
     template = UMUMIY_TEMPLATE if UMUMIY_TEMPLATE.exists() else LEGACY_UMUMIY_TEMPLATE
     if template.exists():
@@ -372,7 +451,7 @@ def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
 
     represented = set(label_rows)
     custom_types = [
-        t for t, value in inv.items()
+        t for t, value in normalized_inv.items()
         if value and t not in represented and t not in {"mandarin", "uztez"}
     ]
     next_row = max([r for r in label_rows.values()] + [15]) + 1
@@ -384,11 +463,9 @@ def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
 
     distributed_labels = {"akb", "jet", "xabib", "navo", "jon", "oneway", "redwing", "uzt"}
     for label, row in label_rows.items():
-        if label == "karobka":
+        if label in ("karobka", "mandarin"):
             continue
-        if label == "mandarin":
-            continue
-        ws.cell(row, 3).value = inv.get(label, 0)
+        ws.cell(row, 3).value = normalized_inv.get(label, 0)
         ws.cell(row, 3).number_format = "0.00"
 
     distributable_rows = [
@@ -399,28 +476,20 @@ def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
         row for label, row in label_rows.items()
         if label not in distributed_labels and label not in {"karobka", "mandarin"}
     ]
-    for row in non_distributed_rows:
-        ws.cell(row, 4).value = None
-        ws.cell(row, 5).value = f"=C{row}+D{row}"
 
-    mandarin_row = label_rows.get("mandarin", 4)
-    non_distributed_refs = [f"C{row}" for row in non_distributed_rows]
-    ws["G3"] = f"=C2" + ("-" + "-".join(non_distributed_refs) if non_distributed_refs else "") + "-C3"
-    ws["H3"] = "=IF(G3=0,0,C3/G3)"
-    ws.cell(mandarin_row, 3).value = (
-        "=G3" + ("-" + "-".join(f"C{row}" for row in distributable_rows) if distributable_rows else "")
-    )
-    ws.cell(mandarin_row, 4).value = f"=C{mandarin_row}*$H$3"
-    ws.cell(mandarin_row, 5).value = f"=C{mandarin_row}+D{mandarin_row}"
+    distributed_formula = "+".join(f"C{r}" for r in sorted(distributable_rows)) or "0"
+    non_distributed_formula = "+".join(f"C{r}" for r in sorted(non_distributed_rows)) or "0"
 
-    for row in distributable_rows:
-        ws.cell(row, 4).value = f"=C{row}*$H$3"
-        ws.cell(row, 5).value = f"=C{row}+D{row}"
+    ws["C13"] = f"={distributed_formula}"
+    ws["C13"].number_format = "0.00"
+    ws["C14"] = f"={non_distributed_formula}"
+    ws["C14"].number_format = "0.00"
 
-    for row in set([3, mandarin_row] + distributable_rows + non_distributed_rows):
-        for col in (3, 4, 5, 7, 8):
-            ws.cell(row, col).number_format = "0.00"
+    # mandarin = total - distributed - non_distributed
+    ws["C12"] = "=(A2-C13)-C14"
+    ws["C12"].number_format = "0.00"
 
+    ws.sheet_view.showGridLines = True
     wb.calculation.calcMode = "auto"
     wb.calculation.fullCalcOnLoad = True
     wb.calculation.forceFullCalc = True
@@ -430,14 +499,177 @@ def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
     return out.getvalue(), _safe_umumiy_filename(report_name)
 
 
-def build_kargo_excel(report_id: int) -> tuple[bytes, str]:
-    from openpyxl import Workbook, load_workbook
+def render_multi_reys_summary(reyslar: list, cargos: dict[int, str]) -> tuple[bytes, str]:
+    from openpyxl import Workbook
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     from openpyxl.utils import get_column_letter
 
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Barcha Reyslar"
+
+    thin = Side(style="thin", color="000000")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    hdr_fill = PatternFill("solid", fgColor="FDE047")
+    hdr_font = Font(bold=True, size=11)
+    align_center = Alignment(horizontal="center", vertical="center")
+    align_right = Alignment(horizontal="right", vertical="center")
+
+    headers = [
+        "T/r", "Reys Kodi", "Kargo", "Qo'shimcha Nomi",
+        "Sana", "Sof Vazn (kg)", "Karobka Vazni (kg)",
+        "Jami Og'irlik (kg)", "Karobkalar Soni"
+    ]
+    for col_idx, h in enumerate(headers, start=1):
+        cell = ws.cell(1, col_idx, h)
+        cell.fill = hdr_fill
+        cell.font = hdr_font
+        cell.alignment = align_center
+        cell.border = border
+
+    row_idx = 2
+    for idx, r in enumerate(reyslar, start=1):
+        cargo_name = cargos.get(r.cargo_id, "-") if r.cargo_id else "-"
+        toza = float(r.toza_kg or 0.0)
+        karobka = float(r.karobka_plus_kg or 0.0)
+        jami = round(toza + karobka, 2)
+        boxes = len(r.entries) if getattr(r, "entries", None) else 0
+
+        vals = [
+            (idx, align_center, None),
+            (r.code, align_center, None),
+            (cargo_name, align_center, None),
+            (r.custom_name or "-", align_center, None),
+            (str(r.date or "-"), align_center, None),
+            (toza, align_right, "0.00"),
+            (karobka, align_right, "0.00"),
+            (jami, align_right, "0.00"),
+            (boxes, align_right, "#,##0"),
+        ]
+        for col_idx, (val, alignment, num_fmt) in enumerate(vals, start=1):
+            cell = ws.cell(row_idx, col_idx, val)
+            cell.alignment = alignment
+            cell.border = border
+            if num_fmt:
+                cell.number_format = num_fmt
+        row_idx += 1
+
+    if len(reyslar) > 0:
+        last_data_row = row_idx - 1
+        ws.cell(row_idx, 1, "").border = border
+        ws.cell(row_idx, 2, "JAMI:").border = border
+        ws.cell(row_idx, 2).font = Font(bold=True)
+        for c in range(3, 6):
+            ws.cell(row_idx, c, "").border = border
+        for c_idx, letter in [(6, "F"), (7, "G"), (8, "H"), (9, "I")]:
+            cell = ws.cell(row_idx, c_idx)
+            cell.value = f"=SUM({letter}2:{letter}{last_data_row})"
+            cell.font = Font(bold=True)
+            cell.alignment = align_right
+            cell.border = border
+            cell.number_format = "0.00" if c_idx < 9 else "#,##0"
+
+    for col in ws.columns:
+        max_len = max(len(str(cell.value or "")) for cell in col)
+        col_letter = get_column_letter(col[0].column)
+        ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+
+    ws.sheet_view.showGridLines = True
+    wb.calculation.calcMode = "auto"
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
+
+    out = BytesIO()
+    wb.save(out)
+    return out.getvalue(), "BARCHA REYSLAR UMUMIY HISOBOT.xlsx"
+
+
+def build_umumiy_excel(report_id: int) -> tuple[bytes, str]:
     report_name = db.report_name(report_id) or "Hisobot"
-    entries = list(reversed(db.list_entries(report_id, "reys", limit=2000)))
-    adjusts = list(reversed(db.list_entries(report_id, "adjust", limit=2000)))
+    obshiy_entries = {
+        action: list(reversed(db.list_entries(report_id, action, limit=2000)))
+        for action in OBSHIY_ACTION_ORDER
+    }
+    reys_entries = list(reversed(db.list_entries(report_id, "reys", limit=2000)))
+    inv = _inventory_for_summary(report_id)
+    return render_umumiy_excel(report_name, obshiy_entries, reys_entries, inv)
+
+
+async def build_umumiy_excel_async(session: AsyncSession, reys_id: int | None = None) -> tuple[bytes, str]:
+    from .models.cargo import Cargo
+    from .models.entry import Entry
+    from .models.inventory import Inventory
+    from .models.reys import Reys
+
+    if reys_id:
+        reys = (await session.execute(
+            select(Reys).where(Reys.id == reys_id, Reys.deleted_at.is_(None))
+        )).scalar_one_or_none()
+        if not reys:
+            return build_umumiy_excel(reys_id)
+
+        cargo_code = ""
+        if reys.cargo_id:
+            cargo = (await session.execute(select(Cargo).where(Cargo.id == reys.cargo_id))).scalar_one_or_none()
+            if cargo:
+                cargo_code = cargo.code
+        report_name = f"{cargo_code + ' ' if cargo_code else ''}{reys.code}{' ' + reys.custom_name if reys.custom_name else ''}".strip()
+
+        entries_models = (await session.execute(
+            select(Entry).where(Entry.reys_id == reys.id, Entry.deleted_at.is_(None)).order_by(Entry.id.asc())
+        )).scalars().all()
+
+        obshiy_entries: dict[str, list[dict]] = {a: [] for a in OBSHIY_ACTION_ORDER}
+        reys_entries: list[dict] = []
+        for e in entries_models:
+            t = (e.tovar_turi or "").strip().lower()
+            cat = None
+            if t == "top":
+                cat = "top"
+            elif t in ("top'dan chiqgan", "topdan chiqgan", "topchiqgan", "top_dan_chiqgan"):
+                cat = "topchiqgan"
+            elif t in ("bizda qoladigan", "bizda", "bizda_qoladigan"):
+                cat = "bizda"
+            elif t in ("bizdan chiqgan", "chiqgan", "bizdan_chiqgan"):
+                cat = "chiqgan"
+            if cat:
+                obshiy_entries[cat].append({
+                    "tovar_turi": e.box_code or "Kodsiz",
+                    "weight": e.gross_weight,
+                    "coefficient": e.tare_weight,
+                    "box_weight": e.tare_weight,
+                    "net": e.net_weight,
+                })
+            else:
+                reys_entries.append({
+                    "tovar_turi": e.tovar_turi,
+                    "weight": e.gross_weight,
+                    "coefficient": e.tare_weight,
+                    "box_weight": e.tare_weight,
+                    "net": e.net_weight,
+                })
+
+        inv_models = (await session.execute(
+            select(Inventory).where(Inventory.reys_id == reys.id)
+        )).scalars().all()
+        inv = {i.tovar_turi: float(i.weight) for i in inv_models}
+
+        return render_umumiy_excel(report_name, obshiy_entries, reys_entries, inv)
+    else:
+        reyslar = (await session.execute(
+            select(Reys).where(Reys.deleted_at.is_(None)).order_by(Reys.id.desc())
+        )).scalars().all()
+        if not reyslar:
+            return render_umumiy_excel("Hisobot", {a: [] for a in OBSHIY_ACTION_ORDER}, [], {})
+
+        cargos = {c.id: c.code for c in (await session.execute(select(Cargo))).scalars().all()}
+        return render_multi_reys_summary(reyslar, cargos)
+
+
+def render_kargo_excel(report_name: str, entries: list[dict], adjusts: list[dict]) -> tuple[bytes, str]:
+    from openpyxl import Workbook, load_workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    from openpyxl.utils import get_column_letter
 
     slots: dict[str, list[dict]] = {}
     custom_types: list[str] = []
@@ -544,3 +776,89 @@ def build_kargo_excel(report_id: int) -> tuple[bytes, str]:
     out = BytesIO()
     wb.save(out)
     return out.getvalue(), _safe_filename(report_name)
+
+
+def build_kargo_excel(report_id: int) -> tuple[bytes, str]:
+    report_name = db.report_name(report_id) or "Hisobot"
+    entries = list(reversed(db.list_entries(report_id, "reys", limit=2000)))
+    adjusts = list(reversed(db.list_entries(report_id, "adjust", limit=2000)))
+    return render_kargo_excel(report_name, entries, adjusts)
+
+
+async def build_kargo_excel_async(
+    session: AsyncSession,
+    reys_id: int | None = None,
+    start: str | None = None,
+    end: str | None = None,
+) -> tuple[bytes, str]:
+    from .models.cargo import Cargo
+    from .models.entry import Entry
+    from .models.reys import Reys
+    from .models.activity import ActivityLog
+
+    if start and end and not reys_id:
+        try:
+            start_ts = int(datetime.datetime.strptime(start, "%Y-%m-%d").replace(hour=0, minute=0, second=0).timestamp())
+            end_ts = int(datetime.datetime.strptime(end, "%Y-%m-%d").replace(hour=23, minute=59, second=59).timestamp())
+        except Exception:
+            start_ts, end_ts = 0, int(time.time())
+        report_name = f"KARGOLAR {start} - {end}"
+        entries_models = (await session.execute(
+            select(Entry)
+            .where(Entry.created_at >= start_ts, Entry.created_at <= end_ts, Entry.deleted_at.is_(None))
+            .order_by(Entry.id.asc())
+        )).scalars().all()
+        adjusts_models = []
+    else:
+        target_id = reys_id
+        if not target_id:
+            latest = (await session.execute(
+                select(Reys).where(Reys.deleted_at.is_(None)).order_by(Reys.id.desc()).limit(1)
+            )).scalar_one_or_none()
+            if latest:
+                target_id = latest.id
+            else:
+                return render_kargo_excel("Hisobot", [], [])
+
+        reys = (await session.execute(
+            select(Reys).where(Reys.id == target_id, Reys.deleted_at.is_(None))
+        )).scalar_one_or_none()
+        if not reys:
+            return build_kargo_excel(target_id)
+
+        cargo_code = ""
+        if reys.cargo_id:
+            cargo = (await session.execute(select(Cargo).where(Cargo.id == reys.cargo_id))).scalar_one_or_none()
+            if cargo:
+                cargo_code = cargo.code
+        report_name = f"{cargo_code + ' ' if cargo_code else ''}{reys.code}{' ' + reys.custom_name if reys.custom_name else ''}".strip()
+
+        entries_models = (await session.execute(
+            select(Entry).where(Entry.reys_id == reys.id, Entry.deleted_at.is_(None)).order_by(Entry.id.asc())
+        )).scalars().all()
+        adjusts_models = (await session.execute(
+            select(ActivityLog).where(ActivityLog.reys_id == reys.id, ActivityLog.action == "adjust").order_by(ActivityLog.id.asc())
+        )).scalars().all()
+
+    entries = [
+        {
+            "tovar_turi": e.tovar_turi,
+            "weight": e.gross_weight,
+            "coefficient": e.tare_weight,
+            "net": e.net_weight,
+            "box_weight": e.tare_weight,
+            "coefficient_mode": e.coefficient_mode,
+        }
+        for e in entries_models
+        if (e.tovar_turi or "").strip().lower() not in OBSHIY_TYPES
+    ]
+    adjusts = [
+        {
+            "from_type": a.from_type,
+            "to_type": a.to_type,
+            "weight": a.weight,
+        }
+        for a in adjusts_models
+        if a.from_type and a.to_type
+    ]
+    return render_kargo_excel(report_name, entries, adjusts)

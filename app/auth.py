@@ -12,6 +12,8 @@ def session_user_from_request(request: Request) -> str | None:
     token = request.cookies.get(SESSION_COOKIE, "")
     if not token and auth_header.startswith("Bearer "):
         token = auth_header[7:].strip()
+    if not token:
+        token = request.query_params.get("token", "")
     return verify_session(token)
 
 
